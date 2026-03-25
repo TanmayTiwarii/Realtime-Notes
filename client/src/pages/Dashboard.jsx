@@ -97,6 +97,7 @@ export default function Dashboard() {
                         <div className="note-content">
                             <h3>{note.title || 'Untitled'}</h3>
                             <p>{new Date(note.updatedAt || note.createdAt).toLocaleDateString()}</p>
+                            <small>Owner: {note.ownerId === currentUser.uid ? 'Me' : note.ownerEmail}</small>
                         </div>
                         {note.ownerId === currentUser.uid && (
                             <button className="delete-btn" onClick={(e) => deleteNote(e, note.id)}>

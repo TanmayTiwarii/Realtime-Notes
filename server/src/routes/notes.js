@@ -1,5 +1,5 @@
 const express = require('express');
-const { db } = require('../firebase/admin');
+const { db, admin } = require('../firebase/admin');
 const verifyToken = require('../middleware/auth');
 const router = express.Router();
 
@@ -46,7 +46,24 @@ router.get('/', verifyToken, async (req, res) => {
         ownerNotes.forEach(doc => notes.push({ id: doc.id, ...doc.data() }));
         sharedNotes.forEach(doc => notes.push({ id: doc.id, ...doc.data() }));
 
-        res.json(notes);
+        // Resolve owner emails
+        const ownerIds = [...new Set(notes.map(n => n.ownerId))];
+        const ownerEmails = {};
+        for (const uid of ownerIds) {
+            try {
+                const userRecord = await admin.auth().getUser(uid);
+                ownerEmails[uid] = userRecord.email;
+            } catch (e) {
+                ownerEmails[uid] = 'Unknown';
+            }
+        }
+
+        const enrichedNotes = notes.map(n => ({
+            ...n,
+            ownerEmail: ownerEmails[n.ownerId]
+        }));
+
+        res.json(enrichedNotes);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -162,6 +179,7 @@ router.post('/:id/share', verifyToken, async (req, res) => {
 
             res.json({ message: `Shared with ${email}` });
         } catch (userError) {
+            console.error('Error fetching user by email:', userError);
             return res.status(404).json({ message: 'User not found with that email' });
         }
 
