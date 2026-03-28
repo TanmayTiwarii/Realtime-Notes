@@ -1,6 +1,6 @@
-const express = require('express');
-const { db, admin } = require('../firebase/admin');
-const verifyToken = require('../middleware/auth');
+import express from 'express';
+import { db, admin } from '../firebase/admin.js';
+import verifyToken from '../middleware/auth.js';
 const router = express.Router();
 
 // Create a new note
@@ -188,4 +188,4 @@ router.post('/:id/share', verifyToken, async (req, res) => {
     }
 });
 
-module.exports = router;
+export default router;

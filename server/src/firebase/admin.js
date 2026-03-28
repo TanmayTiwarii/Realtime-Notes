@@ -1,5 +1,5 @@
-const admin = require('firebase-admin');
-const dotenv = require('dotenv');
+import admin from 'firebase-admin';
+import dotenv from 'dotenv';
 
 dotenv.config();
 
@@ -23,4 +23,4 @@ try {
 const db = admin.firestore();
 const auth = admin.auth();
 
-module.exports = { admin, db, auth };
+export { admin, db, auth };

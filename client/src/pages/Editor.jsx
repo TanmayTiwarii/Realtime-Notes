@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import io from 'socket.io-client';
 import axios from 'axios';
-import { Save, Share2, ArrowLeft, History } from 'lucide-react';
+import { Save, Share2, ArrowLeft, History, X } from 'lucide-react';
 
 export default function Editor() {
     const { id: noteId } = useParams();
@@ -13,6 +13,8 @@ export default function Editor() {
     const [socket, setSocket] = useState(null);
     const [collaborators, setCollaborators] = useState([]);
     const [status, setStatus] = useState('Saved');
+    const [isSharing, setIsSharing] = useState(false);
+    const [shareEmail, setShareEmail] = useState('');
     const navigate = useNavigate();
     const API_URL = import.meta.env.VITE_BACKEND_URL;
 
@@ -141,25 +143,51 @@ export default function Editor() {
                             </span>
                         ))}
                     </div>
-                    <span className="status-indicator">{status}</span>
-                    <button onClick={handleGenericSave} title="Save">
-                        <Save size={20} />
+                    
+                    <div className="status-badge" data-status={status}>
+                        <span className="status-dot"></span>
+                        {status}
+                    </div>
+
+                    <button className="header-btn save-btn" onClick={handleGenericSave} title="Save">
+                        <Save size={18} />
+                        <span>Save</span>
                     </button>
-                    <button onClick={async () => {
-                        const email = prompt("Enter email to share with:");
-                        if (!email) return;
-                        try {
-                            const token = await currentUser.getIdToken();
-                            await axios.post(`${API_URL}/api/notes/${noteId}/share`, { email }, {
-                                headers: { Authorization: `Bearer ${token}` }
-                            });
-                            alert(`Shared with ${email}`);
-                        } catch (err) {
-                            alert(err.response?.data?.message || "Failed to share");
-                        }
-                    }} title="Share">
-                        <Share2 size={20} />
-                    </button>
+
+                    {isSharing ? (
+                        <form className="share-form" onSubmit={async (e) => {
+                            e.preventDefault();
+                            if (!shareEmail) return;
+                            try {
+                                const token = await currentUser.getIdToken();
+                                await axios.post(`${API_URL}/api/notes/${noteId}/share`, { email: shareEmail }, {
+                                    headers: { Authorization: `Bearer ${token}` }
+                                });
+                                alert(`Shared with ${shareEmail}`);
+                                setIsSharing(false);
+                                setShareEmail('');
+                            } catch (err) {
+                                alert(err.response?.data?.message || "Failed to share");
+                            }
+                        }}>
+                            <input
+                                autoFocus
+                                type="email"
+                                value={shareEmail}
+                                onChange={(e) => setShareEmail(e.target.value)}
+                                placeholder="Enter email address"
+                            />
+                            <button type="submit" className="share-submit-btn">Invite</button>
+                            <button type="button" className="share-cancel-btn" onClick={() => setIsSharing(false)}>
+                                <X size={16} />
+                            </button>
+                        </form>
+                    ) : (
+                        <button className="header-btn share-btn" onClick={() => setIsSharing(true)} title="Share">
+                            <Share2 size={18} />
+                            <span>Share</span>
+                        </button>
+                    )}
                 </div>
             </header>
             <textarea

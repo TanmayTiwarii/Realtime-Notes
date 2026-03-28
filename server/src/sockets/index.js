@@ -35,4 +35,4 @@ const socketHandler = (io) => {
     });
 };
 
-module.exports = socketHandler;
+export default socketHandler;

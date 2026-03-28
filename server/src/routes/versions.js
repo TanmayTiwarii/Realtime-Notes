@@ -1,6 +1,6 @@
-const express = require('express');
-const { db } = require('../firebase/admin');
-const verifyToken = require('../middleware/auth');
+import express from 'express';
+import { db } from '../firebase/admin.js';
+import verifyToken from '../middleware/auth.js';
 const router = express.Router();
 
 // Get version history for a note
@@ -64,4 +64,4 @@ router.post('/:noteId', verifyToken, async (req, res) => {
     }
 });
 
-module.exports = router;
+export default router;

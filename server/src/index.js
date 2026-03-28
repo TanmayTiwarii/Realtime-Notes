@@ -1,24 +1,24 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const cors = require('cors');
-const dotenv = require('dotenv');
+import express from 'express';
+import http from 'http';
+import { Server } from 'socket.io';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import socketHandler from './sockets/index.js';
+import notesRoute from './routes/notes.js';
+import versionsRoute from './routes/versions.js';
 
 dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
 
-const notesRoutes = require('./routes/notes');
-const socketHandler = require('./sockets/index');
-
 // Middleware
 app.use(cors());
 app.use(express.json());
 
 // Routes
-app.use('/api/notes', notesRoutes);
-app.use('/api/versions', require('./routes/versions'));
+app.use('/api/notes', notesRoute);
+app.use('/api/versions', versionsRoute);
 
 // Socket.io Setup
 const io = new Server(server, {
