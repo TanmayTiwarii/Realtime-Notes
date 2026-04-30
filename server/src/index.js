@@ -5,9 +5,13 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import socketHandler from './sockets/index.js';
 import notesRoute from './routes/notes.js';
-import versionsRoute from './routes/versions.js';
+import authRoute from './routes/auth.js';
+import connectDB from './config/db.js';
 
 dotenv.config();
+
+// Connect to MongoDB
+connectDB();
 
 const app = express();
 const server = http.createServer(app);
@@ -17,8 +21,9 @@ app.use(cors());
 app.use(express.json());
 
 // Routes
+app.use('/api/auth', authRoute);
 app.use('/api/notes', notesRoute);
-app.use('/api/versions', versionsRoute);
+
 
 // Socket.io Setup
 const io = new Server(server, {

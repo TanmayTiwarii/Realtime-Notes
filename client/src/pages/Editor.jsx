@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import io from 'socket.io-client';
 import axios from 'axios';
-import { Save, Share2, ArrowLeft, History, X } from 'lucide-react';
+import { Save, Share2, ArrowLeft, History, X, Sparkles } from 'lucide-react';
 
 export default function Editor() {
     const { id: noteId } = useParams();
@@ -15,6 +15,8 @@ export default function Editor() {
     const [status, setStatus] = useState('Saved');
     const [isSharing, setIsSharing] = useState(false);
     const [shareEmail, setShareEmail] = useState('');
+    const [summary, setSummary] = useState('');
+    const [isSummarizing, setIsSummarizing] = useState(false);
     const navigate = useNavigate();
     const API_URL = import.meta.env.VITE_BACKEND_URL;
 
@@ -64,12 +66,15 @@ export default function Editor() {
 
     async function fetchNote() {
         try {
-            const token = await currentUser.getIdToken();
+            const token = localStorage.getItem('token');
             const response = await axios.get(`${API_URL}/api/notes/${noteId}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
             setTitle(response.data.title);
             setContent(response.data.content);
+            if (response.data.summary) {
+                setSummary(response.data.summary);
+            }
         } catch (err) {
             console.error("Failed to fetch note", err);
             if (err.response && err.response.status === 403) {
@@ -83,6 +88,7 @@ export default function Editor() {
         const newContent = e.target.value;
         setContent(newContent);
         setStatus('Unsaved...');
+        if (summary) setSummary('');
 
         if (socket) {
             socket.emit('edit-note', noteId, newContent);
@@ -105,7 +111,7 @@ export default function Editor() {
     async function saveNote() {
         try {
             setStatus('Saving...');
-            const token = await currentUser.getIdToken();
+            const token = localStorage.getItem('token');
             await axios.put(`${API_URL}/api/notes/${noteId}`, {
                 title,
                 content
@@ -121,6 +127,23 @@ export default function Editor() {
 
     function handleGenericSave() {
         saveNote();
+    }
+
+    async function handleSummarize() {
+        if (!content.trim()) return;
+        setIsSummarizing(true);
+        try {
+            const token = localStorage.getItem('token');
+            const response = await axios.post(`${API_URL}/api/notes/${noteId}/summarize`, {}, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            setSummary(response.data.summary);
+        } catch (err) {
+            console.error("Failed to summarize", err);
+            alert("Failed to summarize note");
+        } finally {
+            setIsSummarizing(false);
+        }
     }
 
     return (
@@ -159,7 +182,7 @@ export default function Editor() {
                             e.preventDefault();
                             if (!shareEmail) return;
                             try {
-                                const token = await currentUser.getIdToken();
+                                const token = localStorage.getItem('token');
                                 await axios.post(`${API_URL}/api/notes/${noteId}/share`, { email: shareEmail }, {
                                     headers: { Authorization: `Bearer ${token}` }
                                 });
@@ -196,6 +219,27 @@ export default function Editor() {
                 onChange={handleContentChange}
                 placeholder="Start typing..."
             />
+            
+            {summary && (
+                <div className="summary-box">
+                    <div className="summary-header">
+                        <Sparkles size={16} />
+                        <h3>AI Summary</h3>
+                    </div>
+                    <p>{summary}</p>
+                </div>
+            )}
+            
+            <div className="editor-footer">
+                <button 
+                    className="summarize-btn" 
+                    onClick={handleSummarize} 
+                    disabled={isSummarizing || !content.trim()}
+                >
+                    <Sparkles size={18} />
+                    <span>{isSummarizing ? 'Summarizing...' : 'Summarize Note'}</span>
+                </button>
+            </div>
         </div>
     );
 }

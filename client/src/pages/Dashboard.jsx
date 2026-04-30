@@ -18,7 +18,7 @@ export default function Dashboard() {
 
     async function fetchNotes() {
         try {
-            const token = await currentUser.getIdToken();
+            const token = localStorage.getItem('token');
             const response = await axios.get(`${API_URL}/api/notes`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
@@ -39,7 +39,7 @@ export default function Dashboard() {
 
     async function createNote() {
         try {
-            const token = await currentUser.getIdToken();
+            const token = localStorage.getItem('token');
             const response = await axios.post(`${API_URL}/api/notes`, {
                 title: 'Untitled Note',
                 content: ''
@@ -58,7 +58,7 @@ export default function Dashboard() {
         if (!window.confirm("Are you sure you want to delete this note?")) return;
 
         try {
-            const token = await currentUser.getIdToken();
+            const token = localStorage.getItem('token');
             await axios.delete(`${API_URL}/api/notes/${id}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });

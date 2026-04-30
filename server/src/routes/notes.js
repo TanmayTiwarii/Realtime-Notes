@@ -1,26 +1,29 @@
 import express from 'express';
-import { db, admin } from '../firebase/admin.js';
 import verifyToken from '../middleware/auth.js';
+import { GoogleGenAI } from '@google/genai';
+import Note from '../models/Note.js';
+import User from '../models/User.js';
+
 const router = express.Router();
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
 
 // Create a new note
 router.post('/', verifyToken, async (req, res) => {
     try {
         const { title, content } = req.body;
-        const userId = req.user.uid;
+        const userId = req.user._id;
 
-        console.log(`Creating note for user: ${userId}`);
-        const noteRef = await db.collection('notes').add({
+        console.log(`Creating note for user: ${req.user.email}`);
+        const note = await Note.create({
             title: title || 'Untitled Note',
             content: content || '',
             ownerId: userId,
-            sharedWith: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
+            sharedWith: []
         });
-        console.log('Note created:', noteRef.id);
+        console.log('Note created:', note._id);
 
-        res.status(201).json({ id: noteRef.id, message: 'Note created' });
+        res.status(201).json({ id: note._id, message: 'Note created' });
     } catch (error) {
         console.error('Error creating note:', error);
         res.status(500).json({ error: error.message });
@@ -30,37 +33,20 @@ router.post('/', verifyToken, async (req, res) => {
 // Get all notes for a user (owned + shared)
 router.get('/', verifyToken, async (req, res) => {
     try {
-        const userId = req.user.uid;
+        const userId = req.user._id;
 
-        // Notes owned by user
-        const ownerQuery = db.collection('notes').where('ownerId', '==', userId).get();
-
-        // Notes shared with user (requires exact email match or user ID match in array)
-        // For simplicity, assuming sharedWith contains user IDs or emails. 
-        // Let's assume user IDs for now as per schema in prompt.
-        const sharedQuery = db.collection('notes').where('sharedWith', 'array-contains', userId).get();
-
-        const [ownerNotes, sharedNotes] = await Promise.all([ownerQuery, sharedQuery]);
-
-        const notes = [];
-        ownerNotes.forEach(doc => notes.push({ id: doc.id, ...doc.data() }));
-        sharedNotes.forEach(doc => notes.push({ id: doc.id, ...doc.data() }));
-
-        // Resolve owner emails
-        const ownerIds = [...new Set(notes.map(n => n.ownerId))];
-        const ownerEmails = {};
-        for (const uid of ownerIds) {
-            try {
-                const userRecord = await admin.auth().getUser(uid);
-                ownerEmails[uid] = userRecord.email;
-            } catch (e) {
-                ownerEmails[uid] = 'Unknown';
-            }
-        }
+        const notes = await Note.find({
+            $or: [
+                { ownerId: userId },
+                { sharedWith: userId }
+            ]
+        }).populate('ownerId', 'email').lean();
 
         const enrichedNotes = notes.map(n => ({
+            id: n._id, // map _id to id for frontend
             ...n,
-            ownerEmail: ownerEmails[n.ownerId]
+            ownerEmail: n.ownerId ? n.ownerId.email : 'Unknown',
+            ownerId: n.ownerId ? n.ownerId._id : null
         }));
 
         res.json(enrichedNotes);
@@ -73,19 +59,22 @@ router.get('/', verifyToken, async (req, res) => {
 router.get('/:id', verifyToken, async (req, res) => {
     try {
         const noteId = req.params.id;
-        const userId = req.user.uid;
-        const doc = await db.collection('notes').doc(noteId).get();
+        const userId = req.user._id.toString();
+        
+        const note = await Note.findById(noteId).lean();
 
-        if (!doc.exists) {
+        if (!note) {
             return res.status(404).json({ message: 'Note not found' });
         }
 
-        const note = doc.data();
-        if (note.ownerId !== userId && !note.sharedWith.includes(userId)) {
+        const isOwner = note.ownerId.toString() === userId;
+        const isShared = note.sharedWith.some(id => id.toString() === userId);
+
+        if (!isOwner && !isShared) {
             return res.status(403).json({ message: 'Unauthorized' });
         }
 
-        res.json({ id: doc.id, ...note });
+        res.json({ id: note._id, ...note });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -96,25 +85,26 @@ router.put('/:id', verifyToken, async (req, res) => {
     try {
         const noteId = req.params.id;
         const { title, content } = req.body;
-        const userId = req.user.uid;
+        const userId = req.user._id.toString();
 
-        const noteRef = db.collection('notes').doc(noteId);
-        const doc = await noteRef.get();
+        const note = await Note.findById(noteId);
 
-        if (!doc.exists) {
+        if (!note) {
             return res.status(404).json({ message: 'Note not found' });
         }
 
-        const note = doc.data();
-        if (note.ownerId !== userId && !note.sharedWith.includes(userId)) {
+        const isOwner = note.ownerId.toString() === userId;
+        const isShared = note.sharedWith.some(id => id.toString() === userId);
+
+        if (!isOwner && !isShared) {
             return res.status(403).json({ message: 'Unauthorized' });
         }
 
-        await noteRef.update({
-            title,
-            content,
-            updatedAt: new Date().toISOString()
-        });
+        if (title !== undefined) note.title = title;
+        if (content !== undefined) note.content = content;
+        note.summary = undefined; // Invalidate summary on edit
+        
+        await note.save();
 
         res.json({ message: 'Note updated' });
     } catch (error) {
@@ -126,20 +116,19 @@ router.put('/:id', verifyToken, async (req, res) => {
 router.delete('/:id', verifyToken, async (req, res) => {
     try {
         const noteId = req.params.id;
-        const userId = req.user.uid;
+        const userId = req.user._id.toString();
 
-        const noteRef = db.collection('notes').doc(noteId);
-        const doc = await noteRef.get();
+        const note = await Note.findById(noteId);
 
-        if (!doc.exists) {
+        if (!note) {
             return res.status(404).json({ message: 'Note not found' });
         }
 
-        if (doc.data().ownerId !== userId) {
+        if (note.ownerId.toString() !== userId) {
             return res.status(403).json({ message: 'Only owner can delete' });
         }
 
-        await noteRef.delete();
+        await note.deleteOne();
         res.json({ message: 'Note deleted' });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -151,39 +140,81 @@ router.post('/:id/share', verifyToken, async (req, res) => {
     try {
         const noteId = req.params.id;
         const { email } = req.body;
-        const userId = req.user.uid;
+        const userId = req.user._id.toString();
 
         if (!email) {
             return res.status(400).json({ message: 'Email is required' });
         }
 
-        const noteRef = db.collection('notes').doc(noteId);
-        const doc = await noteRef.get();
+        const note = await Note.findById(noteId);
 
-        if (!doc.exists) {
+        if (!note) {
             return res.status(404).json({ message: 'Note not found' });
         }
 
-        if (doc.data().ownerId !== userId) {
+        if (note.ownerId.toString() !== userId) {
             return res.status(403).json({ message: 'Only owner can share' });
         }
 
-        // Lookup user by email
-        try {
-            const userRecord = await admin.auth().getUserByEmail(email);
-            const shareUid = userRecord.uid;
-
-            await noteRef.update({
-                sharedWith: admin.firestore.FieldValue.arrayUnion(shareUid)
-            });
-
-            res.json({ message: `Shared with ${email}` });
-        } catch (userError) {
-            console.error('Error fetching user by email:', userError);
-            return res.status(404).json({ message: 'User not found with that email' });
+        // Lookup user by email in MongoDB
+        const shareUser = await User.findOne({ email });
+        
+        if (!shareUser) {
+            return res.status(404).json({ message: 'User not found with that email. They must log in to the app first.' });
         }
 
+        if (!note.sharedWith.includes(shareUser._id)) {
+            note.sharedWith.push(shareUser._id);
+            await note.save();
+        }
+
+        res.json({ message: `Shared with ${email}` });
     } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Summarize a note
+router.post('/:id/summarize', verifyToken, async (req, res) => {
+    try {
+        const noteId = req.params.id;
+        const userId = req.user._id.toString();
+
+        const note = await Note.findById(noteId);
+
+        if (!note) {
+            return res.status(404).json({ message: 'Note not found' });
+        }
+
+        const isOwner = note.ownerId.toString() === userId;
+        const isShared = note.sharedWith.some(id => id.toString() === userId);
+
+        if (!isOwner && !isShared) {
+            return res.status(403).json({ message: 'Unauthorized' });
+        }
+
+        if (note.summary && !req.body.force) {
+            return res.json({ summary: note.summary });
+        }
+
+        if (!note.content || note.content.trim() === '') {
+            return res.status(400).json({ message: 'Note content is empty' });
+        }
+
+        // Generate summary
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: `Summarize the following notes concisely:\n\n${note.content}`,
+        });
+
+        const summaryText = response.text;
+
+        note.summary = summaryText;
+        await note.save();
+
+        res.json({ summary: summaryText });
+    } catch (error) {
+        console.error('Error generating summary:', error);
         res.status(500).json({ error: error.message });
     }
 });
