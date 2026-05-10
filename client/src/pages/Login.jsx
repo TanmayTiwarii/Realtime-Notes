@@ -43,6 +43,11 @@ export default function Login() {
             <div className="w-100 text-center mt-2">
                 Need an account? <Link to="/signup">Sign Up</Link>
             </div>
+            <div className="demo-info text-center mt-3" style={{ fontSize: '0.9em', color: '#666' }}>
+                <p className="mb-0"><strong>Demo Account:</strong></p>
+                <p className="mb-0">Email: demo@gmail.com</p>
+                <p className="mb-0">Password: 123456</p>
+            </div>
         </div>
     );
 }
