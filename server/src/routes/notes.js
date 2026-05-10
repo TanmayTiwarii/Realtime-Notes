@@ -1,11 +1,11 @@
 import express from 'express';
 import verifyToken from '../middleware/auth.js';
-import { GoogleGenAI } from '@google/genai';
+import Groq from 'groq-sdk';
 import Note from '../models/Note.js';
 import User from '../models/User.js';
 
 const router = express.Router();
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 
 // Create a new note
@@ -202,12 +202,17 @@ router.post('/:id/summarize', verifyToken, async (req, res) => {
         }
 
         // Generate summary
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: `Summarize the following notes concisely:\n\n${note.content}`,
+        const response = await groq.chat.completions.create({
+            messages: [
+                {
+                    role: 'user',
+                    content: `Summarize the following notes concisely:\n\n${note.content}`
+                }
+            ],
+            model: 'llama-3.1-8b-instant',
         });
 
-        const summaryText = response.text;
+        const summaryText = response.choices[0]?.message?.content || "";
 
         note.summary = summaryText;
         await note.save();
