@@ -72,7 +72,7 @@ export default function Dashboard() {
     return (
         <div className="dashboard-container">
             <header className="dashboard-header">
-                <h1>My Notes</h1>
+                <h1>NoteSync <span style={{ fontSize: '0.6em', fontWeight: 'normal', opacity: 0.8 }}>| My Notes</span></h1>
                 <div className="user-info">
                     <span>{currentUser.email}</span>
                     <button onClick={handleLogout} className="btn-icon" title="Logout">

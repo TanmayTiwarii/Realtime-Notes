@@ -27,6 +27,7 @@ export default function Login() {
 
     return (
         <div className="auth-container">
+            <h1 style={{ textAlign: 'center', marginBottom: '1.5rem', color: 'var(--primary-color)', fontWeight: 'bold', fontSize: '2.5rem' }}>NoteSync</h1>
             <h2>Log In</h2>
             {error && <div className="error">{error}</div>}
             <form onSubmit={handleSubmit}>
