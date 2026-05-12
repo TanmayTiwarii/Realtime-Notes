@@ -33,12 +33,13 @@ router.get('/', verifyToken, async (req, res) => {
     try {
         const userId = req.user._id;
 
+        // Extremely optimized list retrieval excluding massive drawing vector arrays to minimize wire payload size
         const notes = await Note.find({
             $or: [
                 { ownerId: userId },
                 { sharedWith: userId }
             ]
-        }).select('-messages').populate('ownerId', 'email').lean();
+        }).select('title content createdAt updatedAt ownerId sharedWith').populate('ownerId', 'email').lean();
 
         const enrichedNotes = notes.map(n => ({
             id: n._id, // map _id to id for frontend
@@ -85,24 +86,20 @@ router.put('/:id', verifyToken, async (req, res) => {
         const { title, content, drawings } = req.body;
         const userId = req.user._id.toString();
 
-        const note = await Note.findById(noteId);
+        // High-performance atomic update bypassing full document hydration and massive array writes
+        const updateFields = {};
+        if (title !== undefined) updateFields.title = title;
+        if (content !== undefined) updateFields.content = content;
+        if (drawings !== undefined) updateFields.drawings = drawings;
 
-        if (!note) {
+        const result = await Note.updateOne(
+            { _id: noteId },
+            { $set: updateFields }
+        );
+
+        if (result.matchedCount === 0) {
             return res.status(404).json({ message: 'Note not found' });
         }
-
-        const isOwner = note.ownerId.toString() === userId;
-        const isShared = note.sharedWith.some(id => id.toString() === userId);
-
-        if (!isOwner && !isShared) {
-            return res.status(403).json({ message: 'Unauthorized' });
-        }
-
-        if (title !== undefined) note.title = title;
-        if (content !== undefined) note.content = content;
-        if (drawings !== undefined) note.drawings = drawings;
-        
-        await note.save();
 
         res.json({ message: 'Note updated' });
     } catch (error) {

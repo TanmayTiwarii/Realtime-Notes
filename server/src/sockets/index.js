@@ -66,9 +66,6 @@ const socketHandler = (io) => {
                 const { sender, content } = messageData;
                 if (!content || !content.trim()) return;
 
-                const note = await Note.findById(noteId);
-                if (!note) return;
-
                 const userMessage = {
                     sender,
                     content,
@@ -76,28 +73,35 @@ const socketHandler = (io) => {
                     createdAt: new Date()
                 };
 
-                note.messages.push(userMessage);
-                await note.save();
+                // Extremely optimized atomic update appending chat arrays while stripping massive drawing memory footprint
+                const updatedNote = await Note.findByIdAndUpdate(
+                    noteId,
+                    { $push: { messages: userMessage } },
+                    { new: true, select: 'messages content' }
+                );
 
-                // Get the saved message with its _id
-                const savedUserMessage = note.messages[note.messages.length - 1];
+                if (!updatedNote) return;
 
-                // Broadcast user message to others in the room
+                // Retrieve hydrated subdocument containing newly assigned _id
+                const savedUserMessage = updatedNote.messages[updatedNote.messages.length - 1];
+
+                // Relay instantly across note room channels
                 socket.to(noteId).emit('chat-message', savedUserMessage);
 
-                // Check if @ai is mentioned
+                // Check AI mention triggers
                 if (content.toLowerCase().includes('@ai')) {
-                    // Notify room that AI is thinking
                     io.to(noteId).emit('ai-typing', true);
 
-                    // Build context from recent chat messages and note content
-                    const recentMessages = note.messages.slice(-10).map(m => `[${m.sender}] says: ${m.content}`).join('\n');
+                    // Constrain token payloads cleanly to eliminate API queue bottlenecks
+                    const recentMessages = updatedNote.messages.slice(-8).map(m => `[${m.sender}]: ${m.content}`).join('\n');
+                    const truncatedContent = updatedNote.content?.slice(0, 2500) || '';
+
                     const prompt = `You are an AI assistant participating in a group chat inside a shared collaborative document.
 The user asking you the question right now is: ${sender}
 
 Current Document Content:
 """
-${note.content}
+${truncatedContent}
 """
 
 Recent Chat History:
@@ -105,9 +109,10 @@ ${recentMessages}
 
 Instructions:
 1. Respond directly to the latest question/message from the user (${sender}) in a friendly, conversational tone.
-2. Do not start your response by repeating their email address or saying "As user@example.com asked". Address them directly as "you" or speak to the group naturally.
-3. Be concise and helpful.`;
+2. Address them directly as "you" or speak to the group naturally.
+3. Keep responses highly focused, accurate, and concise.`;
 
+                    // Run inference logic asynchronously
                     const response = await groq.chat.completions.create({
                         messages: [
                             { role: 'system', content: 'You are a helpful and expert AI assistant embedded in a shared notes workspace group chat.' },
@@ -116,7 +121,7 @@ Instructions:
                         model: 'llama-3.1-8b-instant',
                     });
 
-                    const aiResponseText = response.choices[0]?.message?.content || "I'm here to help!";
+                    const aiResponseText = response.choices[0]?.message?.content || "I'm processing the context streams!";
 
                     const aiMessage = {
                         sender: 'AI Assistant',
@@ -125,12 +130,15 @@ Instructions:
                         createdAt: new Date()
                     };
 
-                    note.messages.push(aiMessage);
-                    await note.save();
+                    // Persist inference text atomically
+                    const finalNote = await Note.findByIdAndUpdate(
+                        noteId,
+                        { $push: { messages: aiMessage } },
+                        { new: true, select: 'messages' }
+                    );
 
-                    const savedAiMessage = note.messages[note.messages.length - 1];
+                    const savedAiMessage = finalNote.messages[finalNote.messages.length - 1];
 
-                    // Broadcast AI message to everyone in the room
                     io.to(noteId).emit('ai-typing', false);
                     io.to(noteId).emit('chat-message', savedAiMessage);
                 }

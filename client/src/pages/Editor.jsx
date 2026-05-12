@@ -208,10 +208,10 @@ export default function Editor() {
         try {
             setStatus('Saving...');
             const token = localStorage.getItem('token');
+            // Omit redundant drawing payloads over REST since socket pipes handle real-time streaming natively
             await axios.put(`${API_URL}/api/notes/${noteId}`, {
                 title,
-                content,
-                drawings
+                content
             }, {
                 headers: { Authorization: `Bearer ${token}` }
             });
