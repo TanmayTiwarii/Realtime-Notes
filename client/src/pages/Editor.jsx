@@ -317,7 +317,8 @@ export default function Editor() {
             if (socket) {
                 socket.emit('draw-stroke', noteId, finishedStroke);
             }
-            setStatus('Unsaved...');
+            // Real-time socket commands immediately save vectors to DB natively
+            setStatus('Saved');
         }
     };
 
@@ -343,7 +344,7 @@ export default function Editor() {
                     toKeep.push(stroke);
                 }
             }
-            if (erasedAny) setStatus('Unsaved...');
+            if (erasedAny) setStatus('Saved');
             return toKeep;
         });
     };
@@ -353,7 +354,7 @@ export default function Editor() {
         if (socket) {
             socket.emit('clear-drawings', noteId);
         }
-        setStatus('Unsaved...');
+        setStatus('Saved');
     };
 
     return (
