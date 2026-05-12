@@ -944,15 +944,31 @@ button:disabled {
 
 /* Editor Main Area & Sidebar Chat */
 .editor-main-area {
-  display: flex;
+  display: block;
   flex-grow: 1;
   position: relative;
-  overflow: hidden;
+  overflow: auto;
+  background: #090d16;
+  height: 100%;
+}
+
+.document-page-container {
+  position: relative;
+  width: 1250px;
+  min-width: 1250px;
+  min-height: calc(100vh - 80px);
+  height: auto;
+  margin: 0 auto;
+  background: #0f172a;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
 }
 
 .editor-textarea {
   flex-grow: 1;
-  padding: 3rem 8% 10rem 8%;
+  width: 100%;
+  padding: 3rem 5rem 10rem 5rem;
   background: transparent;
   color: var(--text-primary);
   border: none;
@@ -961,7 +977,7 @@ button:disabled {
   line-height: 1.8;
   outline: none;
   font-family: 'Inter', sans-serif;
-  overflow-y: auto;
+  overflow-y: hidden;
 }
 
 .editor-textarea::placeholder {
@@ -1225,7 +1241,7 @@ button:disabled {
 
 /* Premium Drawing Layer Overlays & Floating Palette Toolbar */
 .drawing-toolbar {
-  position: absolute;
+  position: fixed;
   bottom: 2.5rem;
   left: 50%;
   transform: translateX(-50%);
@@ -1239,7 +1255,7 @@ button:disabled {
   align-items: center;
   gap: 1.25rem;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(168, 85, 247, 0.1);
-  z-index: 25;
+  z-index: 50;
   animation: slideUpDraw 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -1263,6 +1279,7 @@ button:disabled {
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  background-image: none !important;
 }
 
 .color-swatch:hover {

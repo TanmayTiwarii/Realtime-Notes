@@ -33,6 +33,7 @@ export default function Editor() {
     const [scrollTop, setScrollTop] = useState(0);
 
     const isDrawingRef = useRef(false);
+    const textareaRef = useRef(null);
 
     const navigate = useNavigate();
     const API_URL = import.meta.env.VITE_BACKEND_URL;
@@ -40,6 +41,14 @@ export default function Editor() {
 
     // Ref to track if change is local or remote to avoid loops
     const isLocalChange = useRef(false);
+
+    // Auto-resize document height to fully fit multi-line content natively
+    useEffect(() => {
+        if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto';
+            textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+        }
+    }, [content]);
 
     useEffect(() => {
         const newSocket = io(API_URL);
@@ -176,6 +185,9 @@ export default function Editor() {
         const newContent = e.target.value;
         setContent(newContent);
         setStatus('Unsaved...');
+
+        e.target.style.height = 'auto';
+        e.target.style.height = `${e.target.scrollHeight}px`;
 
         if (socket) {
             socket.emit('edit-note', noteId, newContent);
@@ -439,124 +451,129 @@ export default function Editor() {
                 </div>
             </header>
             
-            <div className="editor-main-area">
-                {/* SVG Vector Drawing Canvas Overlay */}
-                <svg
-                    className="drawing-overlay-canvas"
-                    style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        width: '100%',
-                        height: '100%',
-                        pointerEvents: isDrawingMode ? 'auto' : 'none',
-                        zIndex: isDrawingMode ? 15 : 5
-                    }}
-                    onMouseDown={handleDrawStart}
-                    onMouseMove={handleDrawMove}
-                    onMouseUp={handleDrawEnd}
-                    onMouseLeave={handleDrawEnd}
-                >
-                    <g transform={`translate(0, -${scrollTop})`}>
-                        {drawings.map((stroke) => (
-                            <path
-                                key={stroke.id}
-                                d={stroke.points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}
-                                fill="none"
-                                stroke={stroke.color}
-                                strokeWidth={stroke.strokeWidth}
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            />
-                        ))}
-                        {Object.values(remoteActiveStrokes).map((stroke) => (
-                            stroke && stroke.points && stroke.points.length > 0 && (
-                                <path
-                                    key={`remote-${stroke.id}`}
-                                    d={stroke.points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}
-                                    fill="none"
-                                    stroke={stroke.color}
-                                    strokeWidth={stroke.strokeWidth}
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    opacity={0.8}
-                                />
-                            )
-                        ))}
-                        {currentStroke && currentStroke.points.length > 0 && (
-                            <path
-                                d={currentStroke.points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}
-                                fill="none"
-                                stroke={currentStroke.color}
-                                strokeWidth={currentStroke.strokeWidth}
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
+            <div className="editor-content-wrapper" style={{ display: 'flex', flexGrow: 1, overflow: 'hidden', position: 'relative', minHeight: 0 }}>
+                <div className="editor-main-area">
+                    <div className="document-page-container">
+                        {/* SVG Vector Drawing Canvas Overlay */}
+                        <svg
+                            className="drawing-overlay-canvas"
+                            style={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                width: '100%',
+                                height: '100%',
+                                pointerEvents: isDrawingMode ? 'auto' : 'none',
+                                zIndex: isDrawingMode ? 15 : 5
+                            }}
+                            onMouseDown={handleDrawStart}
+                            onMouseMove={handleDrawMove}
+                            onMouseUp={handleDrawEnd}
+                            onMouseLeave={handleDrawEnd}
+                        >
+                            <g transform={`translate(0, -${scrollTop})`}>
+                                {drawings.map((stroke) => (
+                                    <path
+                                        key={stroke.id}
+                                        d={stroke.points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}
+                                        fill="none"
+                                        stroke={stroke.color}
+                                        strokeWidth={stroke.strokeWidth}
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                    />
+                                ))}
+                                {Object.values(remoteActiveStrokes).map((stroke) => (
+                                    stroke && stroke.points && stroke.points.length > 0 && (
+                                        <path
+                                            key={`remote-${stroke.id}`}
+                                            d={stroke.points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}
+                                            fill="none"
+                                            stroke={stroke.color}
+                                            strokeWidth={stroke.strokeWidth}
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            opacity={0.8}
+                                        />
+                                    )
+                                ))}
+                                {currentStroke && currentStroke.points.length > 0 && (
+                                    <path
+                                        d={currentStroke.points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}
+                                        fill="none"
+                                        stroke={currentStroke.color}
+                                        strokeWidth={currentStroke.strokeWidth}
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                    />
+                                )}
+                            </g>
+                        </svg>
+
+                        {isLoading ? (
+                            <div style={{ flexGrow: 1, padding: '3rem 8%', zIndex: 10 }}>
+                                <div className="skeleton-box skeleton-editor-body" />
+                                <div className="skeleton-box skeleton-editor-body" style={{ width: '90%' }} />
+                                <div className="skeleton-box skeleton-editor-body" style={{ width: '85%' }} />
+                                <div className="skeleton-box skeleton-editor-body" style={{ width: '70%' }} />
+                                <div className="skeleton-box skeleton-editor-body" style={{ width: '95%' }} />
+                                <div className="skeleton-box skeleton-editor-body" style={{ width: '60%' }} />
+                            </div>
+                        ) : (
+                            <textarea
+                                ref={textareaRef}
+                                className="editor-textarea"
+                                value={content}
+                                onChange={handleContentChange}
+                                onScroll={handleTextareaScroll}
+                                placeholder="Start typing..."
                             />
                         )}
-                    </g>
-                </svg>
+                    </div>
 
-                {/* Rich Floating Drawing Toolbar Overlays */}
-                {isDrawingMode && (
-                    <div className="drawing-toolbar">
-                        <div className="palette-swatches">
-                            {['#a855f7', '#0ea5e9', '#10b981', '#f59e0b', '#f43f5e'].map(color => (
-                                <button
-                                    key={color}
-                                    type="button"
-                                    className={`color-swatch ${selectedColor === color && !isEraser ? 'selected' : ''}`}
-                                    style={{ backgroundColor: color }}
-                                    onClick={() => {
-                                        setSelectedColor(color);
-                                        setIsEraser(false);
-                                    }}
-                                    title={color}
-                                />
-                            ))}
+                    {/* Rich Floating Drawing Toolbar Overlays */}
+                    {isDrawingMode && (
+                        <div className="drawing-toolbar">
+                            <div className="palette-swatches">
+                                {['#a855f7', '#0ea5e9', '#10b981', '#f59e0b', '#f43f5e'].map(color => (
+                                    <button
+                                        key={color}
+                                        type="button"
+                                        className={`color-swatch ${selectedColor === color && !isEraser ? 'selected' : ''}`}
+                                        style={{ backgroundColor: color }}
+                                        onClick={() => {
+                                            setSelectedColor(color);
+                                            setIsEraser(false);
+                                        }}
+                                        title={color}
+                                    />
+                                ))}
+                            </div>
+                            
+                            <div className="toolbar-divider" />
+
+                            <button
+                                type="button"
+                                className={`tool-btn ${isEraser ? 'active' : ''}`}
+                                onClick={() => setIsEraser(!isEraser)}
+                                title="Eraser (Click or wipe over strokes)"
+                            >
+                                <Eraser size={18} />
+                                <span>Eraser</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                className="tool-btn clear-btn"
+                                onClick={handleClearCanvas}
+                                title="Clear whole drawing canvas"
+                            >
+                                <Trash2 size={18} />
+                                <span>Clear</span>
+                            </button>
                         </div>
-                        
-                        <div className="toolbar-divider" />
-
-                        <button
-                            type="button"
-                            className={`tool-btn ${isEraser ? 'active' : ''}`}
-                            onClick={() => setIsEraser(!isEraser)}
-                            title="Eraser (Click or wipe over strokes)"
-                        >
-                            <Eraser size={18} />
-                            <span>Eraser</span>
-                        </button>
-
-                        <button
-                            type="button"
-                            className="tool-btn clear-btn"
-                            onClick={handleClearCanvas}
-                            title="Clear whole drawing canvas"
-                        >
-                            <Trash2 size={18} />
-                            <span>Clear</span>
-                        </button>
-                    </div>
-                )}
-
-                {isLoading ? (
-                    <div style={{ flexGrow: 1, padding: '3rem 8%', zIndex: 10 }}>
-                        <div className="skeleton-box skeleton-editor-body" />
-                        <div className="skeleton-box skeleton-editor-body" style={{ width: '90%' }} />
-                        <div className="skeleton-box skeleton-editor-body" style={{ width: '85%' }} />
-                        <div className="skeleton-box skeleton-editor-body" style={{ width: '70%' }} />
-                        <div className="skeleton-box skeleton-editor-body" style={{ width: '95%' }} />
-                        <div className="skeleton-box skeleton-editor-body" style={{ width: '60%' }} />
-                    </div>
-                ) : (
-                    <textarea
-                        className="editor-textarea"
-                        value={content}
-                        onChange={handleContentChange}
-                        onScroll={handleTextareaScroll}
-                        placeholder="Start typing..."
-                    />
-                )}
+                    )}
+                </div>
                 
                 {isChatOpen && (
                     <aside className="chat-sidebar">
