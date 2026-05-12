@@ -2,10 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
-import { Plus, LogOut, FileText, Trash2 } from 'lucide-react';
+import { Plus, LogOut, FileText, Trash2, Search, RefreshCw, Users, Share2 } from 'lucide-react';
 
 export default function Dashboard() {
     const [notes, setNotes] = useState([]);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [activeTab, setActiveTab] = useState('all'); // 'all' | 'shared'
+    const [isRefreshing, setIsRefreshing] = useState(false);
     const { currentUser, logout } = useAuth();
     const [error, setError] = useState('');
     const navigate = useNavigate();
@@ -69,43 +72,186 @@ export default function Dashboard() {
         }
     }
 
+    function getTimeAgo(dateString) {
+        if (!dateString) return 'Just now';
+        const diff = Date.now() - new Date(dateString).getTime();
+        const mins = Math.floor(diff / 60000);
+        if (mins < 1) return 'Updated just now';
+        if (mins < 60) return `Modified ${mins}m ago`;
+        const hours = Math.floor(mins / 60);
+        if (hours < 24) return `Modified ${hours}h ago`;
+        const days = Math.floor(hours / 24);
+        return `Modified ${days}d ago`;
+    }
+
+    const currentUserId = currentUser?.id || currentUser?.uid || currentUser?._id;
+
+    const filteredNotes = notes.filter(note => {
+        // Search filter on the basis of heading only
+        const matchesSearch = (note.title || '').toLowerCase().includes(searchQuery.toLowerCase());
+        if (!matchesSearch) return false;
+
+        // Tab filter
+        if (activeTab === 'shared') {
+            return note.ownerId !== currentUserId;
+        }
+        return true; // 'all' shows everything
+    });
+
     return (
-        <div className="dashboard-container">
-            <header className="dashboard-header">
-                <h1>NoteSync <span style={{ fontSize: '0.6em', fontWeight: 'normal', opacity: 0.8 }}>| My Notes</span></h1>
-                <div className="user-info">
-                    <span>{currentUser.email}</span>
-                    <button onClick={handleLogout} className="btn-icon" title="Logout">
-                        <LogOut size={20} />
+        <div className="dashboard-layout">
+            {/* Left Sidebar matching mockups exactly */}
+            <aside className="dashboard-sidebar">
+                <div className="logo-brand">
+                    <div className="logo-icon">
+                        <FileText size={20} color="white" />
+                    </div>
+                    <div className="brand-text-group">
+                        <h2>NoteSync</h2>
+                        <span>Personal Workspace</span>
+                    </div>
+                </div>
+
+                <div className="sidebar-btn-wrapper">
+                    <button className="new-note-primary-btn" onClick={createNote}>
+                        <Plus size={18} strokeWidth={2.5} />
+                        <span>New Note</span>
                     </button>
                 </div>
-            </header>
 
-            {error && <div className="error-banner">{error}</div>}
+                <nav className="sidebar-nav">
+                    <button 
+                        className={`nav-item ${activeTab === 'all' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('all')}
+                    >
+                        <FileText size={18} />
+                        <span>All Notes</span>
+                    </button>
 
-            <div className="notes-grid">
-                <div className="note-card create-card" onClick={createNote}>
-                    <Plus size={40} />
-                    <span>Create New Note</span>
-                </div>
+                    <button 
+                        className={`nav-item ${activeTab === 'shared' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('shared')}
+                    >
+                        <Users size={18} />
+                        <span>Shared</span>
+                    </button>
+                </nav>
 
-                {notes.map(note => (
-                    <div key={note.id} className="note-card" onClick={() => navigate(`/note/${note.id}`)}>
-                        <div className="note-icon">
-                            <FileText size={30} />
+                <div className="sidebar-bottom">
+                    <div className="user-profile-card">
+                        <div className="user-avatar-circle">
+                            {currentUser?.email?.charAt(0).toUpperCase()}
                         </div>
-                        <div className="note-content">
-                            <h3>{note.title || 'Untitled'}</h3>
-                            <p>{new Date(note.updatedAt || note.createdAt).toLocaleDateString()}</p>
-                            <small>Owner: {note.ownerId === currentUser.uid ? 'Me' : note.ownerEmail}</small>
+                        <div className="user-email-truncate" title={currentUser?.email}>
+                            {currentUser?.email?.split('@')[0]}
                         </div>
-                        {note.ownerId === currentUser.uid && (
-                            <button className="delete-btn" onClick={(e) => deleteNote(e, note.id)}>
-                                <Trash2 size={16} />
-                            </button>
-                        )}
+                        <button className="logout-mini-btn" onClick={handleLogout} title="Log out">
+                            <LogOut size={16} />
+                        </button>
                     </div>
-                ))}
+                </div>
+            </aside>
+
+            {/* Main Area container */}
+            <div className="dashboard-main-area">
+                {/* Top header searchbar matching design */}
+                <header className="dashboard-topbar">
+                    <div className="search-bar-wrapper">
+                        <Search size={18} className="search-icon" />
+                        <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder="Search note headings..."
+                            className="topbar-search-input"
+                        />
+                    </div>
+
+                    <div className="topbar-actions">
+                        <button 
+                            className={`topbar-icon-btn ${isRefreshing ? 'spin' : ''}`} 
+                            onClick={async () => {
+                                setIsRefreshing(true);
+                                await fetchNotes();
+                                setTimeout(() => setIsRefreshing(false), 500);
+                            }} 
+                            title="Refresh Workspace"
+                        >
+                            <RefreshCw size={18} />
+                        </button>
+                        <div className="topbar-user-badge">
+                            <div className="topbar-avatar">
+                                {currentUser?.email?.charAt(0).toUpperCase()}
+                            </div>
+                            <span className="topbar-username">{currentUser?.email?.split('@')[0]}</span>
+                        </div>
+                    </div>
+                </header>
+
+                <main className="dashboard-content">
+                    {error && <div className="premium-error-banner">{error}</div>}
+
+                    <div className="workspace-header">
+                        <div className="title-section">
+                            <h1>My Workspace</h1>
+                            <p>You have {filteredNotes.length} active notes across your workspace.</p>
+                        </div>
+                    </div>
+
+                    {/* Rich Note Cards Grid */}
+                    <div className="premium-notes-grid">
+                        {filteredNotes.map(note => {
+                            const isOwner = note.ownerId === currentUserId;
+                            const categories = ['Strategy', 'Personal', 'Ideas', 'Project'];
+                            const category = categories[(note.title || '').length % categories.length];
+                            const previewText = (note.content || '').replace(/<[^>]*>?/gm, '').substring(0, 95);
+
+                            return (
+                                <div key={note.id} className="premium-note-card" onClick={() => navigate(`/note/${note.id}`)}>
+                                    <div className="card-top-row">
+                                        <span className="category-pill">{isOwner ? category : 'Shared'}</span>
+                                        {isOwner ? (
+                                            <button 
+                                                className="card-delete-icon" 
+                                                onClick={(e) => deleteNote(e, note.id)} 
+                                                title="Delete Note"
+                                            >
+                                                <Trash2 size={15} />
+                                            </button>
+                                        ) : (
+                                            <Share2 size={14} className="shared-indicator" title="Shared with me" />
+                                        )}
+                                    </div>
+
+                                    <div className="card-body">
+                                        <h3 className="card-title">{note.title || 'Untitled Note'}</h3>
+                                        <p className="card-preview">
+                                            {previewText ? previewText + (previewText.length >= 95 ? '...' : '') : 'Empty note content...'}
+                                        </p>
+                                    </div>
+
+                                    <div className="card-footer">
+                                        <span className="time-ago">{getTimeAgo(note.updatedAt || note.createdAt)}</span>
+                                        <div className="card-avatars">
+                                            <span className="mini-avatar owner" title={isOwner ? 'Me' : note.ownerEmail}>
+                                                {(isOwner ? currentUser.email : note.ownerEmail || 'U')?.charAt(0).toUpperCase()}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+
+                        {/* Special Create Blank Note card matching mockup dashed container exactly */}
+                        <div className="premium-create-card" onClick={createNote}>
+                            <div className="create-plus-circle">
+                                <Plus size={24} />
+                            </div>
+                            <span className="create-title">Create blank note</span>
+                            <span className="create-sub">or click here</span>
+                        </div>
+                    </div>
+                </main>
             </div>
         </div>
     );

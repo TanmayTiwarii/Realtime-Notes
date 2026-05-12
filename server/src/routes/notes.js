@@ -1,11 +1,9 @@
 import express from 'express';
 import verifyToken from '../middleware/auth.js';
-import Groq from 'groq-sdk';
 import Note from '../models/Note.js';
 import User from '../models/User.js';
 
 const router = express.Router();
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 
 // Create a new note
@@ -40,7 +38,7 @@ router.get('/', verifyToken, async (req, res) => {
                 { ownerId: userId },
                 { sharedWith: userId }
             ]
-        }).populate('ownerId', 'email').lean();
+        }).select('-messages').populate('ownerId', 'email').lean();
 
         const enrichedNotes = notes.map(n => ({
             id: n._id, // map _id to id for frontend
@@ -84,7 +82,7 @@ router.get('/:id', verifyToken, async (req, res) => {
 router.put('/:id', verifyToken, async (req, res) => {
     try {
         const noteId = req.params.id;
-        const { title, content } = req.body;
+        const { title, content, drawings } = req.body;
         const userId = req.user._id.toString();
 
         const note = await Note.findById(noteId);
@@ -102,7 +100,7 @@ router.put('/:id', verifyToken, async (req, res) => {
 
         if (title !== undefined) note.title = title;
         if (content !== undefined) note.content = content;
-        note.summary = undefined; // Invalidate summary on edit
+        if (drawings !== undefined) note.drawings = drawings;
         
         await note.save();
 
@@ -170,56 +168,6 @@ router.post('/:id/share', verifyToken, async (req, res) => {
 
         res.json({ message: `Shared with ${email}` });
     } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// Summarize a note
-router.post('/:id/summarize', verifyToken, async (req, res) => {
-    try {
-        const noteId = req.params.id;
-        const userId = req.user._id.toString();
-
-        const note = await Note.findById(noteId);
-
-        if (!note) {
-            return res.status(404).json({ message: 'Note not found' });
-        }
-
-        const isOwner = note.ownerId.toString() === userId;
-        const isShared = note.sharedWith.some(id => id.toString() === userId);
-
-        if (!isOwner && !isShared) {
-            return res.status(403).json({ message: 'Unauthorized' });
-        }
-
-        if (note.summary && !req.body.force) {
-            return res.json({ summary: note.summary });
-        }
-
-        if (!note.content || note.content.trim() === '') {
-            return res.status(400).json({ message: 'Note content is empty' });
-        }
-
-        // Generate summary
-        const response = await groq.chat.completions.create({
-            messages: [
-                {
-                    role: 'user',
-                    content: `Summarize the following notes concisely:\n\n${note.content}`
-                }
-            ],
-            model: 'llama-3.1-8b-instant',
-        });
-
-        const summaryText = response.choices[0]?.message?.content || "";
-
-        note.summary = summaryText;
-        await note.save();
-
-        res.json({ summary: summaryText });
-    } catch (error) {
-        console.error('Error generating summary:', error);
         res.status(500).json({ error: error.message });
     }
 });
