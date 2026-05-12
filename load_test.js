@@ -8,7 +8,7 @@ export const options = {
 
 export default function () {
     // Socket.IO v4 endpoint requiring Engine.IO version 4 framing over WebSocket transport
-    const url = 'ws://localhost:5000/socket.io/?EIO=4&transport=websocket';
+    const url = __ENV.TARGET_URL || 'wss://realtime-notes-rzys.onrender.com/socket.io/?EIO=4&transport=websocket';
     
     const res = ws.connect(url, {}, function (socket) {
         socket.on('open', () => {

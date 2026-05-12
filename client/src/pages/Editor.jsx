@@ -15,6 +15,7 @@ export default function Editor() {
     const [status, setStatus] = useState('Saved');
     const [isSharing, setIsSharing] = useState(false);
     const [shareEmail, setShareEmail] = useState('');
+    const [isLoading, setIsLoading] = useState(true);
     
     // Group Chat states
     const [isChatOpen, setIsChatOpen] = useState(false);
@@ -147,6 +148,7 @@ export default function Editor() {
 
     async function fetchNote() {
         try {
+            setIsLoading(true);
             const token = localStorage.getItem('token');
             const response = await axios.get(`${API_URL}/api/notes/${noteId}`, {
                 headers: { Authorization: `Bearer ${token}` }
@@ -165,6 +167,8 @@ export default function Editor() {
                 alert("You do not have access to this note");
                 navigate('/');
             }
+        } finally {
+            setIsLoading(false);
         }
     }
 
@@ -351,12 +355,16 @@ export default function Editor() {
                         NoteSync
                     </div>
                 </div>
-                <input
-                    className="title-input"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="Untitled Note"
-                />
+                {isLoading ? (
+                    <div className="skeleton-box skeleton-editor-title" style={{ flexGrow: 1, margin: '0.5rem' }} />
+                ) : (
+                    <input
+                        className="title-input"
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                        placeholder="Untitled Note"
+                    />
+                )}
                 <div className="editor-actions">
                     <div className="collaborators-list">
                         {collaborators.map((c, i) => (
@@ -531,13 +539,24 @@ export default function Editor() {
                     </div>
                 )}
 
-                <textarea
-                    className="editor-textarea"
-                    value={content}
-                    onChange={handleContentChange}
-                    onScroll={handleTextareaScroll}
-                    placeholder="Start typing..."
-                />
+                {isLoading ? (
+                    <div style={{ flexGrow: 1, padding: '3rem 8%', zIndex: 10 }}>
+                        <div className="skeleton-box skeleton-editor-body" />
+                        <div className="skeleton-box skeleton-editor-body" style={{ width: '90%' }} />
+                        <div className="skeleton-box skeleton-editor-body" style={{ width: '85%' }} />
+                        <div className="skeleton-box skeleton-editor-body" style={{ width: '70%' }} />
+                        <div className="skeleton-box skeleton-editor-body" style={{ width: '95%' }} />
+                        <div className="skeleton-box skeleton-editor-body" style={{ width: '60%' }} />
+                    </div>
+                ) : (
+                    <textarea
+                        className="editor-textarea"
+                        value={content}
+                        onChange={handleContentChange}
+                        onScroll={handleTextareaScroll}
+                        placeholder="Start typing..."
+                    />
+                )}
                 
                 {isChatOpen && (
                     <aside className="chat-sidebar">

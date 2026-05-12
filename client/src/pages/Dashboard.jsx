@@ -9,6 +9,7 @@ export default function Dashboard() {
     const [searchQuery, setSearchQuery] = useState('');
     const [activeTab, setActiveTab] = useState('all'); // 'all' | 'shared'
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
     const { currentUser, logout } = useAuth();
     const [error, setError] = useState('');
     const navigate = useNavigate();
@@ -21,6 +22,7 @@ export default function Dashboard() {
 
     async function fetchNotes() {
         try {
+            setIsLoading(true);
             const token = localStorage.getItem('token');
             const response = await axios.get(`${API_URL}/api/notes`, {
                 headers: { Authorization: `Bearer ${token}` }
@@ -28,6 +30,8 @@ export default function Dashboard() {
             setNotes(response.data);
         } catch (err) {
             console.error("Failed to fetch notes", err);
+        } finally {
+            setIsLoading(false);
         }
     }
 
@@ -200,47 +204,66 @@ export default function Dashboard() {
 
                     {/* Rich Note Cards Grid */}
                     <div className="premium-notes-grid">
-                        {filteredNotes.map(note => {
-                            const isOwner = note.ownerId === currentUserId;
-                            const categories = ['Strategy', 'Personal', 'Ideas', 'Project'];
-                            const category = categories[(note.title || '').length % categories.length];
-                            const previewText = (note.content || '').replace(/<[^>]*>?/gm, '').substring(0, 95);
-
-                            return (
-                                <div key={note.id} className="premium-note-card" onClick={() => navigate(`/note/${note.id}`)}>
+                        {isLoading ? (
+                            Array.from({ length: 6 }).map((_, idx) => (
+                                <div key={idx} className="skeleton-card">
                                     <div className="card-top-row">
-                                        <span className="category-pill">{isOwner ? category : 'Shared'}</span>
-                                        {isOwner ? (
-                                            <button 
-                                                className="card-delete-icon" 
-                                                onClick={(e) => deleteNote(e, note.id)} 
-                                                title="Delete Note"
-                                            >
-                                                <Trash2 size={15} />
-                                            </button>
-                                        ) : (
-                                            <Share2 size={14} className="shared-indicator" title="Shared with me" />
-                                        )}
+                                        <div className="skeleton-box skeleton-pill" />
                                     </div>
-
                                     <div className="card-body">
-                                        <h3 className="card-title">{note.title || 'Untitled Note'}</h3>
-                                        <p className="card-preview">
-                                            {previewText ? previewText + (previewText.length >= 95 ? '...' : '') : 'Empty note content...'}
-                                        </p>
+                                        <div className="skeleton-box skeleton-title" />
+                                        <div className="skeleton-box skeleton-text" />
+                                        <div className="skeleton-box skeleton-text skeleton-text-short" />
                                     </div>
-
                                     <div className="card-footer">
-                                        <span className="time-ago">{getTimeAgo(note.updatedAt || note.createdAt)}</span>
-                                        <div className="card-avatars">
-                                            <span className="mini-avatar owner" title={isOwner ? 'Me' : note.ownerEmail}>
-                                                {(isOwner ? currentUser.email : note.ownerEmail || 'U')?.charAt(0).toUpperCase()}
-                                            </span>
-                                        </div>
+                                        <div className="skeleton-box skeleton-pill" style={{ width: '80px' }} />
+                                        <div className="skeleton-box skeleton-avatar" />
                                     </div>
                                 </div>
-                            );
-                        })}
+                            ))
+                        ) : (
+                            filteredNotes.map(note => {
+                                const isOwner = note.ownerId === currentUserId;
+                                const categories = ['Strategy', 'Personal', 'Ideas', 'Project'];
+                                const category = categories[(note.title || '').length % categories.length];
+                                const previewText = (note.content || '').replace(/<[^>]*>?/gm, '').substring(0, 95);
+
+                                return (
+                                    <div key={note.id} className="premium-note-card" onClick={() => navigate(`/note/${note.id}`)}>
+                                        <div className="card-top-row">
+                                            <span className="category-pill">{isOwner ? category : 'Shared'}</span>
+                                            {isOwner ? (
+                                                <button 
+                                                    className="card-delete-icon" 
+                                                    onClick={(e) => deleteNote(e, note.id)} 
+                                                    title="Delete Note"
+                                                >
+                                                    <Trash2 size={15} />
+                                                </button>
+                                            ) : (
+                                                <Share2 size={14} className="shared-indicator" title="Shared with me" />
+                                            )}
+                                        </div>
+
+                                        <div className="card-body">
+                                            <h3 className="card-title">{note.title || 'Untitled Note'}</h3>
+                                            <p className="card-preview">
+                                                {previewText ? previewText + (previewText.length >= 95 ? '...' : '') : 'Empty note content...'}
+                                            </p>
+                                        </div>
+
+                                        <div className="card-footer">
+                                            <span className="time-ago">{getTimeAgo(note.updatedAt || note.createdAt)}</span>
+                                            <div className="card-avatars">
+                                                <span className="mini-avatar owner" title={isOwner ? 'Me' : note.ownerEmail}>
+                                                    {(isOwner ? currentUser.email : note.ownerEmail || 'U')?.charAt(0).toUpperCase()}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })
+                        )}
 
                         {/* Special Create Blank Note card matching mockup dashed container exactly */}
                         <div className="premium-create-card" onClick={createNote}>
