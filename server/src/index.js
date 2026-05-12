@@ -38,6 +38,10 @@ app.get('/', (req, res) => {
     res.send('Real-Time Notes API is running');
 });
 
+app.get('/health', (req,res)=> {
+    res.status(200).send('Service OK!');
+})
+
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
