@@ -97,20 +97,20 @@ const socketHandler = (io) => {
                     const truncatedContent = updatedNote.content?.slice(0, 2500) || '';
 
                     const prompt = `You are an AI assistant participating in a group chat inside a shared collaborative document.
-The user asking you the question right now is: ${sender}
+                    The user asking you the question right now is: ${sender}
 
-Current Document Content:
-"""
-${truncatedContent}
-"""
+                    Current Document Content:
+                    """
+                    ${truncatedContent}
+                    """
 
-Recent Chat History:
-${recentMessages}
+                    Recent Chat History:
+                    ${recentMessages}
 
-Instructions:
-1. Respond directly to the latest question/message from the user (${sender}) in a friendly, conversational tone.
-2. Address them directly as "you" or speak to the group naturally.
-3. Keep responses highly focused, accurate, and concise.`;
+                    Instructions:
+                    1. Respond directly to the latest question/message from the user (${sender}) in a friendly, conversational tone.
+                    2. Address them directly as "you" or speak to the group naturally.
+                    3. Keep responses highly focused, accurate, and concise.`;
 
                     // Run inference logic asynchronously
                     const response = await groq.chat.completions.create({
@@ -163,3 +163,4 @@ Instructions:
 
 export default socketHandler;
 
+    
