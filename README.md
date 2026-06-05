@@ -1,27 +1,27 @@
-KO# Real-Time Collaborative Notes App
+# NoteSync AI
 
-A production-grade Real-Time Collaborative Notes Application similar to Google Docs Lite. Built with React, Node.js, Socket.io, and Firebase.
+A production-grade Real-Time Collaborative Notes and Drawing Application. Built with React, Node.js, Socket.io, MongoDB, and Groq (LLaMA 3.1).
 
 ## Features
 
-- **Real-Time Collaboration**: Multiple users can edit notes simultaneously with live syncing.
-- **Authentication**: Secure login/signup via Firebase Auth.
-- **Presence**: See who is currently editing the note.
-- **Sharing**: Share notes with other users via email.
-- **Version History**: Track changes and revisions.
-- **Dashboard**: Manage your personal and shared notes.
+- **Real-Time Collaboration**: Multiple users can edit notes simultaneously with live syncing via Socket.io.
+- **Infinite Canvas Vector Drawing**: Draw, highlight, and collaborate visually in real-time.
+- **AI Workspace Assistant**: An integrated group chat where mentioning `@ai` summons a LLaMA 3.1 assistant (via Groq API) that answers questions based on the document's content and chat history.
+- **Authentication**: Secure JWT-based login/signup with bcrypt.
+- **Load-Tested Architecture**: Configured with a `k6` load testing suite capable of simulating concurrent virtual users broadcasting rapid vector drawing points.
 
 ## Tech Stack
 
-- **Frontend**: React (Vite), Socket.io Client, Firebase Client SDK, CSS
-- **Backend**: Node.js, Express, Socket.io, Firebase Admin SDK
-- **Database**: Firebase Firestore
+- **Frontend**: React 19 (Vite), React Router v7, Socket.io Client, Lucide React, Axios
+- **Backend**: Node.js, Express, Socket.io, Groq SDK
+- **Database**: MongoDB (Mongoose)
 
 ## Setup Instructions
 
 ### Prerequisites
-- Node.js (v14+)
-- A Firebase Project with Firestore and Auth enabled.
+- Node.js (v18+)
+- MongoDB connection string.
+- Groq API Key.
 
 ### 1. Backend Setup
 
@@ -34,15 +34,14 @@ A production-grade Real-Time Collaborative Notes Application similar to Google D
    npm install
    ```
 3. Configure Environment Variables:
-   - Copy `.env.example` to `.env`:
-     ```bash
-     cp .env.example .env
-     ```
-   - Fill in your Firebase Service Account details and other config.
-     - `FIREBASE_PRIVATE_KEY`: Your service account private key (ensure newlines are handled correctly if pasting).
-     - `FIREBASE_CLIENT_EMAIL`: Your service account email.
-     - `FIREBASE_PROJECT_ID`: Your project ID.
-
+   Create a `.env` file in the `server` directory:
+   ```env
+   PORT=5000
+   MONGO_URI=your_mongodb_connection_string
+   JWT_SECRET=your_jwt_secret
+   GROQ_API_KEY=your_groq_api_key
+   FRONTEND_URL=http://localhost:5173
+   ```
 4. Start the server:
    ```bash
    npm run dev
@@ -60,44 +59,29 @@ A production-grade Real-Time Collaborative Notes Application similar to Google D
    npm install
    ```
 3. Configure Environment Variables:
-   - Copy `.env.example` to `.env`:
-     ```bash
-     cp .env.example .env
-     ```
-   - Fill in your Firebase Web App config (API Key, Auth Domain, etc.).
-
+   Create a `.env` file in the `client` directory:
+   ```env
+   VITE_BACKEND_URL=http://localhost:5000
+   ```
 4. Start the client:
    ```bash
    npm run dev
    ```
    Client runs on http://localhost:5173
 
+### 3. Load Testing (Optional)
+
+To benchmark the WebSocket server's performance:
+1. Ensure [k6](https://k6.io/) is installed.
+2. Run the load test from the root directory:
+   ```bash
+   k6 run load_test.js
+   ```
+
 ## Usage
 
 1. Open http://localhost:5173
-2. Sign up for an account.
+2. Sign up for a new account.
 3. Create a new note from the dashboard.
-4. Open the same note in a different browser/incognito window with a different account (or share it with the other email).
-5. Type in one window and see changes appear instantly in the other!
-
-## Environment Variables
-
-### Server (.env)
-```
-PORT=5000
-FIREBASE_PROJECT_ID=...
-FIREBASE_CLIENT_EMAIL=...
-FIREBASE_PRIVATE_KEY=...
-FRONTEND_URL=http://localhost:5173
-```
-
-### Client (.env)
-```
-VITE_FIREBASE_API_KEY=...
-VITE_FIREBASE_AUTH_DOMAIN=...
-VITE_FIREBASE_PROJECT_ID=...
-VITE_FIREBASE_STORAGE_BUCKET=...
-VITE_FIREBASE_MESSAGING_SENDER_ID=...
-VITE_FIREBASE_APP_ID=...
-VITE_BACKEND_URL=http://localhost:5000
-```
+4. Share the URL with other users for real-time collaborative editing and drawing.
+5. Open the chat panel and mention `@ai` to get contextual help from the LLaMA 3.1 assistant!
