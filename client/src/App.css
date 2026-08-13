@@ -583,10 +583,10 @@ button {
   background: #141b2d;
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 20px;
-  padding: 0.4rem 1.2rem;
-  width: 380px;
+  padding: 0.4rem 0.6rem 0.4rem 1.2rem;
+  width: 420px;
   max-width: 100%;
-  gap: 0.6rem;
+  gap: 0.5rem;
   transition: all 0.2s;
 }
 
@@ -605,7 +605,8 @@ button {
   background: transparent;
   border: none;
   color: white;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   outline: none;
   font-size: 0.9rem;
   padding: 0.2rem 0;
@@ -1648,4 +1649,52 @@ button {
   height: 20px;
   margin-bottom: 16px;
   border-radius: 6px;
+}
+
+/* ============================================
+   RAG Semantic Search Toggle & Spinner
+   ============================================ */
+
+.semantic-search-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #64748b;
+  padding: 0.3rem 0.65rem;
+  border-radius: 14px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+}
+
+.semantic-search-toggle:hover {
+  color: #a78bfa;
+  border-color: rgba(167, 139, 250, 0.25);
+  background: rgba(167, 139, 250, 0.08);
+}
+
+.semantic-search-toggle.active {
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.18);
+  border-color: rgba(139, 92, 246, 0.4);
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.2), inset 0 0 8px rgba(139, 92, 246, 0.08);
+}
+
+.semantic-search-toggle.active svg {
+  filter: drop-shadow(0 0 4px rgba(167, 139, 250, 0.6));
+}
+
+.search-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(139, 92, 246, 0.15);
+  border-top-color: #8b5cf6;
+  border-radius: 50%;
+  animation: spinCw 0.6s linear infinite;
+  flex-shrink: 0;
 }

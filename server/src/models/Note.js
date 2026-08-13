@@ -13,7 +13,9 @@ const noteSchema = new mongoose.Schema({
     messages: [messageSchema],
     drawings: { type: Array, default: [] },
     ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    sharedWith: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
+    sharedWith: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    embedding: { type: [Number], default: [] },
+    embeddingUpdatedAt: { type: Date }
 }, { timestamps: true });
 
 // Optimize query performance via persistent indexing

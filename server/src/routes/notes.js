@@ -2,6 +2,7 @@ import express from 'express';
 import verifyToken from '../middleware/auth.js';
 import Note from '../models/Note.js';
 import User from '../models/User.js';
+import { updateNoteEmbedding, searchSimilarNotes } from '../services/embeddings.js';
 
 const router = express.Router();
 
@@ -20,6 +21,11 @@ router.post('/', verifyToken, async (req, res) => {
             sharedWith: []
         });
         console.log('Note created:', note._id);
+
+        // Fire-and-forget: generate embedding for new note
+        if (content) {
+            updateNoteEmbedding(note._id, title, content);
+        }
 
         res.status(201).json({ id: note._id, message: 'Note created' });
     } catch (error) {
@@ -101,6 +107,19 @@ router.put('/:id', verifyToken, async (req, res) => {
             return res.status(404).json({ message: 'Note not found' });
         }
 
+        // Fire-and-forget: update embedding when text content changes
+        if (title !== undefined || content !== undefined) {
+            // Fetch current values for fields not provided in this update
+            const currentNote = await Note.findById(noteId).select('title content').lean();
+            if (currentNote) {
+                updateNoteEmbedding(
+                    noteId,
+                    title !== undefined ? title : currentNote.title,
+                    content !== undefined ? content : currentNote.content
+                );
+            }
+        }
+
         res.json({ message: 'Note updated' });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -165,6 +184,33 @@ router.post('/:id/share', verifyToken, async (req, res) => {
 
         res.json({ message: `Shared with ${email}` });
     } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Semantic search across user's notes via RAG embeddings
+router.post('/search', verifyToken, async (req, res) => {
+    try {
+        const { query, limit } = req.body;
+        const userId = req.user._id.toString();
+
+        if (!query || !query.trim()) {
+            return res.status(400).json({ message: 'Search query is required' });
+        }
+
+        const results = await searchSimilarNotes(query, userId, limit || 5);
+
+        // Enrich with computed fields for frontend compatibility
+        const enriched = results.map(n => ({
+            id: n._id,
+            title: n.title,
+            content: n.content,
+            score: n.score
+        }));
+
+        res.json(enriched);
+    } catch (error) {
+        console.error('Semantic search error:', error);
         res.status(500).json({ error: error.message });
     }
 });
