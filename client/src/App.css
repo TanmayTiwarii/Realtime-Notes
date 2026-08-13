@@ -1670,6 +1670,8 @@ button {
   transition: all 0.25s ease;
   flex-shrink: 0;
   letter-spacing: 0.02em;
+  width: auto;
+  box-shadow: none;
 }
 
 .semantic-search-toggle:hover {
