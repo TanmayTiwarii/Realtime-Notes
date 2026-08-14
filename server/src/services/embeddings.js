@@ -104,8 +104,13 @@ export async function searchSimilarNotes(queryText, userId, limit = 5) {
             }
         ]);
 
-        console.log(`[RAG] Vector search returned ${results.length} results for query: "${queryText.slice(0, 50)}..."`);
-        return results;
+        // Filter out low-relevance results — vector search always returns top-k,
+        // even if similarity is very weak. Threshold of 0.5 keeps only meaningful matches.
+        const MIN_SCORE_THRESHOLD = 0.6;
+        const filtered = results.filter(r => r.score >= MIN_SCORE_THRESHOLD);
+
+        console.log(`[RAG] Vector search returned ${results.length} results (${filtered.length} above threshold ${MIN_SCORE_THRESHOLD}) for query: "${queryText.slice(0, 50)}..."`);
+        return filtered;
     } catch (error) {
         console.error('[RAG] Vector search failed:', error.message);
         // Graceful fallback: return empty results so the AI still works without RAG

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import axios from 'axios';
+import api from '../services/api';
 import { Plus, LogOut, FileText, Trash2, Search, RefreshCw, Users, Share2, Sparkles } from 'lucide-react';
 
 export default function Dashboard() {
@@ -17,8 +17,6 @@ export default function Dashboard() {
     const [error, setError] = useState('');
     const navigate = useNavigate();
 
-    const API_URL = import.meta.env.VITE_BACKEND_URL;
-
     useEffect(() => {
         fetchNotes();
     }, []);
@@ -33,12 +31,9 @@ export default function Dashboard() {
         const timeoutId = setTimeout(async () => {
             try {
                 setIsSearching(true);
-                const token = localStorage.getItem('token');
-                const response = await axios.post(`${API_URL}/api/notes/search`, {
+                const response = await api.post(`/api/notes/search`, {
                     query: searchQuery,
                     limit: 10
-                }, {
-                    headers: { Authorization: `Bearer ${token}` }
                 });
                 setSemanticResults(response.data);
             } catch (err) {
@@ -55,10 +50,7 @@ export default function Dashboard() {
     async function fetchNotes() {
         try {
             setIsLoading(true);
-            const token = localStorage.getItem('token');
-            const response = await axios.get(`${API_URL}/api/notes`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const response = await api.get(`/api/notes`);
             setNotes(response.data);
         } catch (err) {
             console.error("Failed to fetch notes", err);
@@ -78,12 +70,9 @@ export default function Dashboard() {
 
     async function createNote() {
         try {
-            const token = localStorage.getItem('token');
-            const response = await axios.post(`${API_URL}/api/notes`, {
+            const response = await api.post(`/api/notes`, {
                 title: 'Untitled Note',
                 content: ''
-            }, {
-                headers: { Authorization: `Bearer ${token}` }
             });
             navigate(`/note/${response.data.id}`);
         } catch (err) {
@@ -97,10 +86,7 @@ export default function Dashboard() {
         if (!window.confirm("Are you sure you want to delete this note?")) return;
 
         try {
-            const token = localStorage.getItem('token');
-            await axios.delete(`${API_URL}/api/notes/${id}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            await api.delete(`/api/notes/${id}`);
             setNotes(notes.filter(n => n.id !== id));
         } catch (err) {
             console.error("Failed to delete note", err);

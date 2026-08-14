@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import axios from 'axios';
 
 const AuthContext = createContext();
 
@@ -13,10 +14,10 @@ export function AuthProvider({ children }) {
     const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 
     useEffect(() => {
-        const token = localStorage.getItem('token');
+        const accessToken = localStorage.getItem('accessToken');
         const user = localStorage.getItem('user');
         
-        if (token && user) {
+        if (accessToken && user) {
             try {
                 setCurrentUser(JSON.parse(user));
             } catch (e) {
@@ -35,7 +36,8 @@ export function AuthProvider({ children }) {
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || 'Failed to sign up');
         
-        localStorage.setItem('token', data.token);
+        localStorage.setItem('accessToken', data.accessToken);
+        localStorage.setItem('refreshToken', data.refreshToken);
         localStorage.setItem('user', JSON.stringify(data.user));
         setCurrentUser(data.user);
         return data;
@@ -50,16 +52,28 @@ export function AuthProvider({ children }) {
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || 'Failed to log in');
 
-        localStorage.setItem('token', data.token);
+        localStorage.setItem('accessToken', data.accessToken);
+        localStorage.setItem('refreshToken', data.refreshToken);
         localStorage.setItem('user', JSON.stringify(data.user));
         setCurrentUser(data.user);
         return data;
     }
 
-    function logout() {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setCurrentUser(null);
+    async function logout() {
+        try {
+            const refreshToken = localStorage.getItem('refreshToken');
+            if (refreshToken) {
+                // Revoke refresh token server-side
+                await axios.post(`${API_URL}/api/auth/logout`, { refreshToken });
+            }
+        } catch (e) {
+            console.error('Failed to revoke refresh token:', e.message);
+        } finally {
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('refreshToken');
+            localStorage.removeItem('user');
+            setCurrentUser(null);
+        }
     }
 
     const value = {

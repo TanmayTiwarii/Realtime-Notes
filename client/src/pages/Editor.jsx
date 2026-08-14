@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import io from 'socket.io-client';
-import axios from 'axios';
+import api from '../services/api';
 import { Save, Share2, ArrowLeft, X, MessageSquare, Send, Pencil, Eraser, RotateCcw, Trash2 } from 'lucide-react';
 
 export default function Editor() {
@@ -158,10 +158,7 @@ export default function Editor() {
     async function fetchNote() {
         try {
             setIsLoading(true);
-            const token = localStorage.getItem('token');
-            const response = await axios.get(`${API_URL}/api/notes/${noteId}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const response = await api.get(`/api/notes/${noteId}`);
             setTitle(response.data.title);
             setContent(response.data.content);
             if (response.data.messages) {
@@ -207,13 +204,9 @@ export default function Editor() {
     async function saveNote() {
         try {
             setStatus('Saving...');
-            const token = localStorage.getItem('token');
-            // Omit redundant drawing payloads over REST since socket pipes handle real-time streaming natively
-            await axios.put(`${API_URL}/api/notes/${noteId}`, {
+            await api.put(`/api/notes/${noteId}`, {
                 title,
                 content
-            }, {
-                headers: { Authorization: `Bearer ${token}` }
             });
             setStatus('Saved');
         } catch (err) {
@@ -402,10 +395,7 @@ export default function Editor() {
                             e.preventDefault();
                             if (!shareEmail) return;
                             try {
-                                const token = localStorage.getItem('token');
-                                await axios.post(`${API_URL}/api/notes/${noteId}/share`, { email: shareEmail }, {
-                                    headers: { Authorization: `Bearer ${token}` }
-                                });
+                                await api.post(`/api/notes/${noteId}/share`, { email: shareEmail });
                                 alert(`Shared with ${shareEmail}`);
                                 setIsSharing(false);
                                 setShareEmail('');
