@@ -1,6 +1,6 @@
 import Groq from 'groq-sdk';
 import Note from '../models/Note.js';
-import { searchSimilarNotes } from '../services/embeddings.js';
+import { searchSimilarChunks } from '../services/embeddings.js';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -97,19 +97,19 @@ const socketHandler = (io) => {
                     const recentMessages = updatedNote.messages.slice(-8).map(m => `[${m.sender}]: ${m.content}`).join('\n');
                     const truncatedContent = updatedNote.content?.slice(0, 2500) || '';
 
-                    // --- RAG: Retrieve relevant notes from vector search ---
+                    // --- RAG: Retrieve relevant chunks from vector search ---
                     let ragContext = '';
                     try {
                         // Get the user ID from the socket (set during join-note)
                         const userId = socket.userId;
                         if (userId) {
-                            const relevantNotes = await searchSimilarNotes(content, userId.toString(), 3);
-                            if (relevantNotes.length > 0) {
-                                ragContext = '\n\nRelevant Notes from Workspace (retrieved via semantic search):\n' +
-                                    relevantNotes.map((n, i) => 
-                                        `--- Note ${i + 1}: "${n.title || 'Untitled'}" ---\n${(n.content || '').slice(0, 1500)}`
+                            const relevantChunks = await searchSimilarChunks(content, userId.toString(), 6);
+                            if (relevantChunks.length > 0) {
+                                ragContext = '\n\nRelevant Passages from Workspace (retrieved via semantic chunk search):\n' +
+                                    relevantChunks.map((c, i) => 
+                                        `--- Passage ${i + 1} (from "${c.noteTitle}", chunk #${c.chunkIndex}) [score: ${c.score.toFixed(2)}] ---\n${c.chunkContent}`
                                     ).join('\n\n');
-                                console.log(`[RAG] Injected ${relevantNotes.length} relevant notes into AI context`);
+                                console.log(`[RAG] Injected ${relevantChunks.length} relevant chunks into AI context`);
                             }
                         }
                     } catch (ragError) {
@@ -131,7 +131,7 @@ const socketHandler = (io) => {
                     1. Respond directly to the latest question/message from the user (${sender}) in a friendly, conversational tone.
                     2. Address them directly as "you" or speak to the group naturally.
                     3. Keep responses highly focused, accurate, and concise.
-                    4. If relevant notes from the workspace were provided, use that knowledge to give more informed answers. Reference specific notes when helpful.`;
+                    4. If relevant passages from the workspace were provided, use that knowledge to give more informed answers. Reference the source note title when helpful.`;
 
                     // Run inference logic asynchronously
                     const response = await groq.chat.completions.create({

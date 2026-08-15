@@ -2,7 +2,7 @@ import express from 'express';
 import verifyToken from '../middleware/auth.js';
 import Note from '../models/Note.js';
 import User from '../models/User.js';
-import { updateNoteEmbedding, searchSimilarNotes } from '../services/embeddings.js';
+import { updateNoteChunks, deleteNoteChunks, syncChunkAccess, searchSimilarNotes } from '../services/embeddings.js';
 
 const router = express.Router();
 
@@ -22,9 +22,9 @@ router.post('/', verifyToken, async (req, res) => {
         });
         console.log('Note created:', note._id);
 
-        // Fire-and-forget: generate embedding for new note
+        // Fire-and-forget: chunk and embed new note
         if (content) {
-            updateNoteEmbedding(note._id, title, content);
+            updateNoteChunks(note._id, userId, [], title, content);
         }
 
         res.status(201).json({ id: note._id, message: 'Note created' });
@@ -107,13 +107,15 @@ router.put('/:id', verifyToken, async (req, res) => {
             return res.status(404).json({ message: 'Note not found' });
         }
 
-        // Fire-and-forget: update embedding when text content changes
+        // Fire-and-forget: re-chunk and re-embed when text content changes
         if (title !== undefined || content !== undefined) {
             // Fetch current values for fields not provided in this update
-            const currentNote = await Note.findById(noteId).select('title content').lean();
+            const currentNote = await Note.findById(noteId).select('title content ownerId sharedWith').lean();
             if (currentNote) {
-                updateNoteEmbedding(
+                updateNoteChunks(
                     noteId,
+                    currentNote.ownerId,
+                    currentNote.sharedWith || [],
                     title !== undefined ? title : currentNote.title,
                     content !== undefined ? content : currentNote.content
                 );
@@ -143,6 +145,8 @@ router.delete('/:id', verifyToken, async (req, res) => {
         }
 
         await note.deleteOne();
+        // Fire-and-forget: clean up orphaned chunks
+        deleteNoteChunks(noteId);
         res.json({ message: 'Note deleted' });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -180,6 +184,8 @@ router.post('/:id/share', verifyToken, async (req, res) => {
         if (!note.sharedWith.includes(shareUser._id)) {
             note.sharedWith.push(shareUser._id);
             await note.save();
+            // Fire-and-forget: sync denormalized access on chunks
+            syncChunkAccess(noteId, note.sharedWith);
         }
 
         res.json({ message: `Shared with ${email}` });
