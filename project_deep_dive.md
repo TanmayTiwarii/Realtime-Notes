@@ -334,7 +334,7 @@ erDiagram
 ```
 
 **Performance Optimizations in the data layer**:
-1. **Compound indexes** on `ownerId` and `sharedWith` for fast note retrieval ([Note.js:L20-21](file:///d:/Projects/Realtime%20Notes/server/src/models/Note.js#L20-L21))
+1. **Single-field indexes** on `ownerId` and `sharedWith` for fast note retrieval via `$or` queries ([Note.js:L20-21](file:///d:/Projects/Realtime%20Notes/server/src/models/Note.js#L20-L21))
 2. **TTL index** on `RefreshToken.expiresAt` — MongoDB automatically garbage-collects expired tokens ([RefreshToken.js:L10](file:///d:/Projects/Realtime%20Notes/server/src/models/RefreshToken.js#L10))
 3. **Selective projection** — dashboard queries exclude `drawings` arrays (which can be massive) via `.select('title content createdAt...')` ([notes.js:L48](file:///d:/Projects/Realtime%20Notes/server/src/routes/notes.js#L48))
 4. **Atomic updates** — `Note.updateOne({ $set })` bypasses full document hydration ([notes.js:L101-104](file:///d:/Projects/Realtime%20Notes/server/src/routes/notes.js#L101-L104))
