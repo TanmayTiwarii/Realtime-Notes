@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import io from 'socket.io-client';
 import api from '../services/api';
-import { Save, Share2, ArrowLeft, X, MessageSquare, Send, Pencil, Eraser, RotateCcw, Trash2 } from 'lucide-react';
+import { Save, Share2, ArrowLeft, X, MessageSquare, Send, Pencil, Eraser, RotateCcw, Trash2, Lock, Unlock, Edit3, Loader } from 'lucide-react';
 
 export default function Editor() {
     const { id: noteId } = useParams();
@@ -32,8 +32,16 @@ export default function Editor() {
     const [isEraser, setIsEraser] = useState(false);
     const [scrollTop, setScrollTop] = useState(0);
 
+    // Write-lock states
+    const [lockHolder, setLockHolder] = useState(null);       // { userEmail } or null
+    const [hasLock, setHasLock] = useState(false);             // this client holds the lock
+    const [lockRequesting, setLockRequesting] = useState(false);
+    const [warningMsg, setWarningMsg] = useState('');
+
     const isDrawingRef = useRef(false);
     const textareaRef = useRef(null);
+    const heartbeatRef = useRef(null);
+    const warningTimeoutRef = useRef(null);
 
     const navigate = useNavigate();
     const API_URL = import.meta.env.VITE_BACKEND_URL;
@@ -129,7 +137,38 @@ export default function Editor() {
             setCollaborators(prev => prev.filter(c => (c.id || c.uid || c._id) !== leftUserId));
         });
 
+        // ── Write-lock listeners ─────────────────────────────
+        socket.on('lock-granted', () => {
+            setHasLock(true);
+            setLockHolder(null);
+            setLockRequesting(false);
+        });
+
+        socket.on('lock-denied', (data) => {
+            setHasLock(false);
+            if (data.holder) setLockHolder(data.holder);
+            setLockRequesting(false);
+        });
+
+        socket.on('note-locked', (data) => {
+            setLockHolder(data.holder);
+            setHasLock(false);
+        });
+
+        socket.on('note-unlocked', () => {
+            setLockHolder(null);
+            // Don't touch hasLock here — if this client released, it was already set to false
+        });
+
+        socket.on('lock-state', (data) => {
+            // Initial state on join — someone already holds the lock
+            setLockHolder(data.holder);
+            setHasLock(false);
+        });
+
         return () => {
+            // Release lock before leaving
+            socket.emit('release-edit-lock', noteId);
             socket.emit('leave-note', noteId);
             socket.off('note-updated');
             socket.off('user-joined');
@@ -140,8 +179,30 @@ export default function Editor() {
             socket.off('stroke-deleted');
             socket.off('drawings-cleared');
             socket.off('user-left');
+            socket.off('lock-granted');
+            socket.off('lock-denied');
+            socket.off('note-locked');
+            socket.off('note-unlocked');
+            socket.off('lock-state');
+            // Clear heartbeat
+            if (heartbeatRef.current) clearInterval(heartbeatRef.current);
         };
     }, [socket, noteId, currentUser]);
+
+    // Heartbeat to keep the lock alive while editing
+    useEffect(() => {
+        if (hasLock && socket) {
+            heartbeatRef.current = setInterval(() => {
+                socket.emit('heartbeat-lock', noteId);
+            }, 30000);
+        }
+        return () => {
+            if (heartbeatRef.current) {
+                clearInterval(heartbeatRef.current);
+                heartbeatRef.current = null;
+            }
+        };
+    }, [hasLock, socket, noteId]);
 
     useEffect(() => {
         fetchNote();
@@ -179,6 +240,7 @@ export default function Editor() {
     }
 
     const handleContentChange = (e) => {
+        if (!hasLock) return;
         const newContent = e.target.value;
         setContent(newContent);
         setStatus('Unsaved...');
@@ -189,6 +251,44 @@ export default function Editor() {
         if (socket) {
             socket.emit('edit-note', noteId, newContent);
         }
+    };
+
+    const handleInteraction = () => {
+        if (hasLock) return;
+        if (lockHolder) {
+            setWarningMsg('Cannot write right now');
+            if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
+            warningTimeoutRef.current = setTimeout(() => setWarningMsg(''), 3000);
+        } else if (!lockRequesting) {
+            setLockRequesting(true);
+            socket.emit('request-edit-lock', noteId);
+        }
+    };
+
+    const handleDocumentBlur = (e) => {
+        // If focus is moving between title and textarea, do not release
+        if (e.relatedTarget && (
+            e.relatedTarget.classList.contains('title-input') || 
+            e.relatedTarget.classList.contains('editor-textarea')
+        )) {
+            return;
+        }
+        
+        // Otherwise, focus left the document area -> release lock
+        if (socket && hasLock) {
+            saveNote();
+            socket.emit('release-edit-lock', noteId);
+            setHasLock(false);
+            setLockHolder(null);
+        }
+    };
+
+    const handleBackNavigation = () => {
+        if (socket && hasLock) {
+            saveNote();
+            socket.emit('release-edit-lock', noteId);
+        }
+        navigate('/');
     };
 
     // Simple debounce for saving to DB
@@ -354,7 +454,7 @@ export default function Editor() {
         <div className="editor-container">
             <header className="editor-header">
                 <div className="editor-brand-left" style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
-                    <button className="back-btn" onClick={() => navigate('/')} title="Back to NoteSync Workspace">
+                    <button className="back-btn" onClick={handleBackNavigation} title="Back to NoteSync Workspace">
                         <ArrowLeft size={20} />
                     </button>
                     <div className="editor-logo-pill" style={{ background: 'rgba(99, 102, 241, 0.15)', border: '1px solid rgba(99, 102, 241, 0.3)', padding: '0.3rem 0.75rem', borderRadius: '8px', fontWeight: '700', fontSize: '0.85rem', color: '#cbd5e1' }}>
@@ -367,7 +467,11 @@ export default function Editor() {
                     <input
                         className="title-input"
                         value={title}
-                        onChange={(e) => setTitle(e.target.value)}
+                        onClick={handleInteraction}
+                        onFocus={handleInteraction}
+                        onBlur={handleDocumentBlur}
+                        onChange={(e) => { if (hasLock) setTitle(e.target.value); }}
+                        readOnly={!hasLock}
                         placeholder="Untitled Note"
                     />
                 )}
@@ -389,7 +493,6 @@ export default function Editor() {
                         <Save size={18} />
                         <span>Save</span>
                     </button>
-
                     {isSharing ? (
                         <form className="share-form" onSubmit={async (e) => {
                             e.preventDefault();
@@ -441,6 +544,16 @@ export default function Editor() {
                     </button>
                 </div>
             </header>
+
+            {/* Lock banner — visible when someone else holds the lock */}
+            {lockHolder && !hasLock && (
+                <div className="lock-banner">
+                    <span className="lock-pulse"></span>
+                    <Lock size={14} />
+                    <span>{lockHolder.userEmail} is editing</span>
+                    {warningMsg && <span style={{marginLeft: 'auto', color: '#f87171', fontWeight: 600}}>{warningMsg}</span>}
+                </div>
+            )}
             
             <div className="editor-content-wrapper" style={{ display: 'flex', flexGrow: 1, overflow: 'hidden', position: 'relative', minHeight: 0 }}>
                 <div className="editor-main-area">
@@ -513,11 +626,15 @@ export default function Editor() {
                         ) : (
                             <textarea
                                 ref={textareaRef}
-                                className="editor-textarea"
+                                className={`editor-textarea ${!hasLock ? 'editor-readonly' : ''}`}
                                 value={content}
+                                onClick={handleInteraction}
+                                onFocus={handleInteraction}
+                                onBlur={handleDocumentBlur}
                                 onChange={handleContentChange}
                                 onScroll={handleTextareaScroll}
-                                placeholder="Start typing..."
+                                readOnly={!hasLock}
+                                placeholder={hasLock ? 'Start typing...' : 'Click to start editing...'}
                             />
                         )}
                     </div>

@@ -1,10 +1,24 @@
 import Groq from 'groq-sdk';
 import Note from '../models/Note.js';
 import { searchSimilarChunks } from '../services/embeddings.js';
+import {
+    acquireLock,
+    releaseLock,
+    isLockHolder,
+    renewLock,
+    releaseAllForSocket,
+    getLockInfo,
+    onStaleRelease
+} from '../services/lockManager.js';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const socketHandler = (io) => {
+    // When a stale lock is auto-released, broadcast note-unlocked to the room
+    onStaleRelease((noteId, holder) => {
+        io.to(noteId).emit('note-unlocked', { noteId });
+        console.log(`[Lock] Stale unlock broadcast for note ${noteId}`);
+    });
     io.on('connection', (socket) => {
         console.log('User connected:', socket.id);
 
@@ -13,15 +27,79 @@ const socketHandler = (io) => {
             socket.join(noteId);
             if (user) {
                 socket.userId = user.id || user.uid || user._id;
+                socket.userEmail = user.email;
             }
             console.log(`User ${user?.email || socket.id} joined note: ${noteId}`);
 
             // Notify others in the room
             socket.to(noteId).emit('user-joined', user);
+
+            // Send current lock state to the joining client
+            const lockInfo = getLockInfo(noteId);
+            if (lockInfo) {
+                socket.emit('lock-state', {
+                    noteId,
+                    holder: { userEmail: lockInfo.userEmail, userId: lockInfo.userId }
+                });
+            }
         });
 
-        // Handle note edits
+        // ── Write-lock events ───────────────────────────────────
+
+        socket.on('request-edit-lock', async (noteId) => {
+            try {
+                // Verify the user has permission to edit this note
+                const note = await Note.findById(noteId).select('ownerId sharedWith').lean();
+                if (!note) {
+                    socket.emit('lock-denied', { noteId, reason: 'Note not found' });
+                    return;
+                }
+
+                const uid = socket.userId?.toString();
+                const isOwner = note.ownerId.toString() === uid;
+                const isShared = note.sharedWith.some(id => id.toString() === uid);
+
+                if (!isOwner && !isShared) {
+                    socket.emit('lock-denied', { noteId, reason: 'Unauthorized' });
+                    return;
+                }
+
+                const result = acquireLock(noteId, socket.id, uid, socket.userEmail);
+
+                if (result.granted) {
+                    socket.emit('lock-granted', { noteId });
+                    socket.to(noteId).emit('note-locked', {
+                        noteId,
+                        holder: { userEmail: socket.userEmail, userId: uid }
+                    });
+                    console.log(`[Lock] Granted to ${socket.userEmail} on note ${noteId}`);
+                } else {
+                    socket.emit('lock-denied', {
+                        noteId,
+                        holder: result.holder
+                    });
+                }
+            } catch (err) {
+                console.error('[Lock] Error processing lock request:', err);
+                socket.emit('lock-denied', { noteId, reason: 'Server error' });
+            }
+        });
+
+        socket.on('release-edit-lock', (noteId) => {
+            const released = releaseLock(noteId, socket.id);
+            if (released) {
+                io.to(noteId).emit('note-unlocked', { noteId });
+                console.log(`[Lock] Released by ${socket.userEmail} on note ${noteId}`);
+            }
+        });
+
+        socket.on('heartbeat-lock', (noteId) => {
+            renewLock(noteId, socket.id);
+        });
+
+        // Handle note edits — only if sender holds the lock
         socket.on('edit-note', (noteId, content) => {
+            if (!isLockHolder(noteId, socket.id)) return;
             // Broadcast to everyone else in the room
             socket.to(noteId).emit('note-updated', content);
         });
@@ -178,6 +256,13 @@ const socketHandler = (io) => {
 
         socket.on('disconnect', () => {
             console.log('User disconnected:', socket.id);
+
+            // Release any locks held by this socket
+            const releasedNotes = releaseAllForSocket(socket.id);
+            for (const nId of releasedNotes) {
+                io.to(nId).emit('note-unlocked', { noteId: nId });
+                console.log(`[Lock] Auto-released on disconnect for note ${nId}`);
+            }
         });
     });
 };
