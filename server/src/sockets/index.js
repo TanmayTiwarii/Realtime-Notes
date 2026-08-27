@@ -2,29 +2,26 @@ import Groq from 'groq-sdk';
 import Note from '../models/Note.js';
 import { searchSimilarChunks } from '../services/embeddings.js';
 import {
-    acquireLock,
-    releaseLock,
-    isLockHolder,
-    renewLock,
-    releaseAllForSocket,
-    getLockInfo,
-    onStaleRelease
-} from '../services/lockManager.js';
+    initSession,
+    receiveOp,
+    removeClient,
+    getDocument
+} from '../services/otManager.js';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const socketHandler = (io) => {
-    // When a stale lock is auto-released, broadcast note-unlocked to the room
-    onStaleRelease((noteId, holder) => {
-        io.to(noteId).emit('note-unlocked', { noteId });
-        console.log(`[Lock] Stale unlock broadcast for note ${noteId}`);
-    });
     io.on('connection', (socket) => {
         console.log('User connected:', socket.id);
 
+        // Track which notes this socket has joined (for cleanup on disconnect)
+        const joinedNotes = new Set();
+
         // Join a specific note room
-        socket.on('join-note', (noteId, user) => {
+        socket.on('join-note', async (noteId, user) => {
             socket.join(noteId);
+            joinedNotes.add(noteId);
+
             if (user) {
                 socket.userId = user.id || user.uid || user._id;
                 socket.userEmail = user.email;
@@ -34,74 +31,56 @@ const socketHandler = (io) => {
             // Notify others in the room
             socket.to(noteId).emit('user-joined', user);
 
-            // Send current lock state to the joining client
-            const lockInfo = getLockInfo(noteId);
-            if (lockInfo) {
-                socket.emit('lock-state', {
-                    noteId,
-                    holder: { userEmail: lockInfo.userEmail, userId: lockInfo.userId }
-                });
-            }
-        });
-
-        // ── Write-lock events ───────────────────────────────────
-
-        socket.on('request-edit-lock', async (noteId) => {
+            // Initialize OT session and send current document state
             try {
-                // Verify the user has permission to edit this note
-                const note = await Note.findById(noteId).select('ownerId sharedWith').lean();
-                if (!note) {
-                    socket.emit('lock-denied', { noteId, reason: 'Note not found' });
-                    return;
-                }
-
-                const uid = socket.userId?.toString();
-                const isOwner = note.ownerId.toString() === uid;
-                const isShared = note.sharedWith.some(id => id.toString() === uid);
-
-                if (!isOwner && !isShared) {
-                    socket.emit('lock-denied', { noteId, reason: 'Unauthorized' });
-                    return;
-                }
-
-                const result = acquireLock(noteId, socket.id, uid, socket.userEmail);
-
-                if (result.granted) {
-                    socket.emit('lock-granted', { noteId });
-                    socket.to(noteId).emit('note-locked', {
-                        noteId,
-                        holder: { userEmail: socket.userEmail, userId: uid }
-                    });
-                    console.log(`[Lock] Granted to ${socket.userEmail} on note ${noteId}`);
-                } else {
-                    socket.emit('lock-denied', {
-                        noteId,
-                        holder: result.holder
-                    });
-                }
+                const { document, revision } = await initSession(noteId, socket.id);
+                socket.emit('doc-sync', { content: document, revision });
             } catch (err) {
-                console.error('[Lock] Error processing lock request:', err);
-                socket.emit('lock-denied', { noteId, reason: 'Server error' });
+                console.error(`[OT] Failed to init session for note ${noteId}:`, err);
+                socket.emit('ot-error', { message: 'Failed to sync document' });
             }
         });
 
-        socket.on('release-edit-lock', (noteId) => {
-            const released = releaseLock(noteId, socket.id);
-            if (released) {
-                io.to(noteId).emit('note-unlocked', { noteId });
-                console.log(`[Lock] Released by ${socket.userEmail} on note ${noteId}`);
+        // ── OT operation submission ────────────────────────────────
+
+        socket.on('submit-op', ({ noteId, revision, op }) => {
+            const result = receiveOp(noteId, revision, op);
+
+            if (result.ok) {
+                // Acknowledge the sender with the new revision
+                socket.emit('op-ack', {
+                    noteId,
+                    revision: result.revision
+                });
+
+                // Broadcast the transformed op to all other clients in the room
+                socket.to(noteId).emit('apply-op', {
+                    noteId,
+                    op: result.op,
+                    revision: result.revision
+                });
+            } else {
+                console.warn(`[OT] Op rejected for note ${noteId}:`, result.error);
+                // Tell the client to re-sync
+                const state = getDocument(noteId);
+                if (state) {
+                    socket.emit('doc-sync', {
+                        content: state.document,
+                        revision: state.revision
+                    });
+                }
             }
         });
 
-        socket.on('heartbeat-lock', (noteId) => {
-            renewLock(noteId, socket.id);
-        });
+        // ── Title editing (last-write-wins) ────────────────────────
 
-        // Handle note edits — only if sender holds the lock
-        socket.on('edit-note', (noteId, content) => {
-            if (!isLockHolder(noteId, socket.id)) return;
-            // Broadcast to everyone else in the room
-            socket.to(noteId).emit('note-updated', content);
+        socket.on('edit-title', async (noteId, newTitle) => {
+            socket.to(noteId).emit('title-updated', newTitle);
+            try {
+                await Note.updateOne({ _id: noteId }, { $set: { title: newTitle } });
+            } catch (err) {
+                console.error('Error saving title:', err);
+            }
         });
 
         // Handle live drawing progress relay
@@ -248,25 +227,26 @@ const socketHandler = (io) => {
         });
 
         // Leave note room
-        socket.on('leave-note', (noteId) => {
+        socket.on('leave-note', async (noteId) => {
             socket.leave(noteId);
+            joinedNotes.delete(noteId);
             console.log(`User left note: ${noteId}`);
             socket.to(noteId).emit('user-left', socket.userId || socket.id);
+
+            // Remove from OT session
+            await removeClient(noteId, socket.id);
         });
 
-        socket.on('disconnect', () => {
+        socket.on('disconnect', async () => {
             console.log('User disconnected:', socket.id);
 
-            // Release any locks held by this socket
-            const releasedNotes = releaseAllForSocket(socket.id);
-            for (const nId of releasedNotes) {
-                io.to(nId).emit('note-unlocked', { noteId: nId });
-                console.log(`[Lock] Auto-released on disconnect for note ${nId}`);
+            // Clean up all OT sessions this socket was part of
+            for (const noteId of joinedNotes) {
+                await removeClient(noteId, socket.id);
             }
+            joinedNotes.clear();
         });
     });
 };
 
 export default socketHandler;
-
-    

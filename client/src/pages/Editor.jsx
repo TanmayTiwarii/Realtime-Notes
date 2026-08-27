@@ -1,9 +1,109 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import io from 'socket.io-client';
 import api from '../services/api';
-import { Save, Share2, ArrowLeft, X, MessageSquare, Send, Pencil, Eraser, RotateCcw, Trash2, Lock, Unlock, Edit3, Loader } from 'lucide-react';
+import { Save, Share2, ArrowLeft, X, MessageSquare, Send, Pencil, Eraser, RotateCcw, Trash2 } from 'lucide-react';
+
+// ── Lightweight OT helpers (client-side, mirrors server ot.js) ──
+
+function isRetain(c) { return typeof c === 'number' && c > 0; }
+function isInsert(c) { return typeof c === 'string'; }
+function isDelete(c) { return typeof c === 'number' && c < 0; }
+
+function opLengths(op) {
+    let inputLen = 0, outputLen = 0;
+    for (const c of op) {
+        if (isRetain(c)) { inputLen += c; outputLen += c; }
+        else if (isInsert(c)) { outputLen += c.length; }
+        else if (isDelete(c)) { inputLen += -c; }
+    }
+    return { inputLen, outputLen };
+}
+
+class OpBuilder {
+    constructor() { this.ops = []; }
+    retain(n) {
+        if (n <= 0) return;
+        const last = this.ops[this.ops.length - 1];
+        if (isRetain(last)) this.ops[this.ops.length - 1] = last + n;
+        else this.ops.push(n);
+    }
+    insert(s) {
+        if (!s || s.length === 0) return;
+        const last = this.ops[this.ops.length - 1];
+        if (isInsert(last)) this.ops[this.ops.length - 1] = last + s;
+        else this.ops.push(s);
+    }
+    delete(n) {
+        if (n <= 0) return;
+        const last = this.ops[this.ops.length - 1];
+        if (isDelete(last)) this.ops[this.ops.length - 1] = last - n;
+        else this.ops.push(-n);
+    }
+    build() {
+        return [...this.ops];
+    }
+}
+
+function applyOp(doc, op) {
+    let result = '', pos = 0;
+    for (const c of op) {
+        if (isRetain(c)) { result += doc.slice(pos, pos + c); pos += c; }
+        else if (isInsert(c)) { result += c; }
+        else if (isDelete(c)) { pos += -c; }
+    }
+    result += doc.slice(pos);
+    return result;
+}
+
+function transformOps(op1, op2) {
+    const b1 = new OpBuilder(), b2 = new OpBuilder();
+    let i1 = 0, i2 = 0, c1 = op1[i1], c2 = op2[i2];
+    while (i1 < op1.length || i2 < op2.length) {
+        if (c1 === undefined && c2 === undefined) break;
+        if (isInsert(c1)) { b1.insert(c1); b2.retain(c1.length); i1++; c1 = op1[i1]; continue; }
+        if (isInsert(c2)) { b1.retain(c2.length); b2.insert(c2); i2++; c2 = op2[i2]; continue; }
+        if (c1 === undefined || c2 === undefined) break;
+        if (isRetain(c1) && isRetain(c2)) {
+            const m = Math.min(c1, c2); b1.retain(m); b2.retain(m);
+            c1 = c1 - m > 0 ? c1 - m : op1[++i1]; c2 = c2 - m > 0 ? c2 - m : op2[++i2];
+        } else if (isDelete(c1) && isDelete(c2)) {
+            const m = Math.min(-c1, -c2);
+            c1 = -c1 - m > 0 ? -((-c1) - m) : op1[++i1]; c2 = -c2 - m > 0 ? -((-c2) - m) : op2[++i2];
+        } else if (isDelete(c1) && isRetain(c2)) {
+            const m = Math.min(-c1, c2); b1.delete(m);
+            c1 = -c1 - m > 0 ? -((-c1) - m) : op1[++i1]; c2 = c2 - m > 0 ? c2 - m : op2[++i2];
+        } else if (isRetain(c1) && isDelete(c2)) {
+            const m = Math.min(c1, -c2); b2.delete(m);
+            c1 = c1 - m > 0 ? c1 - m : op1[++i1]; c2 = -c2 - m > 0 ? -((-c2) - m) : op2[++i2];
+        } else break;
+    }
+    return [b1.build(), b2.build()];
+}
+
+function diffToOp(oldText, newText) {
+    if (oldText === newText) return [];
+    let prefixLen = 0;
+    const minLen = Math.min(oldText.length, newText.length);
+    while (prefixLen < minLen && oldText[prefixLen] === newText[prefixLen]) prefixLen++;
+    let suffixLen = 0;
+    while (
+        suffixLen < (oldText.length - prefixLen) &&
+        suffixLen < (newText.length - prefixLen) &&
+        oldText[oldText.length - 1 - suffixLen] === newText[newText.length - 1 - suffixLen]
+    ) suffixLen++;
+    const deletedLen = oldText.length - prefixLen - suffixLen;
+    const insertedStr = newText.slice(prefixLen, newText.length - suffixLen);
+    const b = new OpBuilder();
+    b.retain(prefixLen);
+    if (deletedLen > 0) b.delete(deletedLen);
+    if (insertedStr.length > 0) b.insert(insertedStr);
+    b.retain(suffixLen);
+    return b.build();
+}
+
+// ── Editor Component ────────────────────────────────────────────
 
 export default function Editor() {
     const { id: noteId } = useParams();
@@ -12,7 +112,7 @@ export default function Editor() {
     const [title, setTitle] = useState('');
     const [socket, setSocket] = useState(null);
     const [collaborators, setCollaborators] = useState([]);
-    const [status, setStatus] = useState('Saved');
+    const [status, setStatus] = useState('Synced');
     const [isSharing, setIsSharing] = useState(false);
     const [shareEmail, setShareEmail] = useState('');
     const [isLoading, setIsLoading] = useState(true);
@@ -32,23 +132,19 @@ export default function Editor() {
     const [isEraser, setIsEraser] = useState(false);
     const [scrollTop, setScrollTop] = useState(0);
 
-    // Write-lock states
-    const [lockHolder, setLockHolder] = useState(null);       // { userEmail } or null
-    const [hasLock, setHasLock] = useState(false);             // this client holds the lock
-    const [lockRequesting, setLockRequesting] = useState(false);
-    const [warningMsg, setWarningMsg] = useState('');
-
     const isDrawingRef = useRef(false);
     const textareaRef = useRef(null);
-    const heartbeatRef = useRef(null);
-    const warningTimeoutRef = useRef(null);
 
     const navigate = useNavigate();
     const API_URL = import.meta.env.VITE_BACKEND_URL;
     const messagesEndRef = useRef(null);
 
-    // Ref to track if change is local or remote to avoid loops
-    const isLocalChange = useRef(false);
+    // ── OT State (refs to avoid re-render loops) ────────────────
+    const docRef = useRef('');         // The shadow document for diffing
+    const revisionRef = useRef(0);     // Last acknowledged server revision
+    const pendingRef = useRef(null);   // Op sent to server, waiting for ack
+    const bufferRef = useRef(null);    // Buffered local op while pending is in-flight
+    const syncedRef = useRef(false);   // Has received doc-sync?
 
     // Auto-resize document height to fully fit multi-line content natively
     useEffect(() => {
@@ -76,9 +172,102 @@ export default function Editor() {
             email: currentUser.email
         });
 
-        // Listen for incoming note changes
-        socket.on('note-updated', (newContent) => {
-            setContent(newContent);
+        // ── OT: Initial document sync ───────────────────────────
+        socket.on('doc-sync', ({ content: serverContent, revision }) => {
+            docRef.current = serverContent;
+            revisionRef.current = revision;
+            pendingRef.current = null;
+            bufferRef.current = null;
+            syncedRef.current = true;
+            setContent(serverContent);
+            setIsLoading(false);
+            setStatus('Synced');
+        });
+
+        // ── OT: Server acknowledged our op ──────────────────────
+        socket.on('op-ack', ({ revision }) => {
+            revisionRef.current = revision;
+            pendingRef.current = null;
+
+            // If we have a buffered op, send it now
+            if (bufferRef.current && bufferRef.current.length > 0) {
+                const bufferedOp = bufferRef.current;
+                bufferRef.current = null;
+                pendingRef.current = bufferedOp;
+                socket.emit('submit-op', {
+                    noteId,
+                    revision: revisionRef.current,
+                    op: bufferedOp
+                });
+                setStatus('Syncing...');
+            } else {
+                setStatus('Synced');
+            }
+        });
+
+        // ── OT: Remote op from another client ───────────────────
+        socket.on('apply-op', ({ op, revision }) => {
+            revisionRef.current = revision;
+
+            // Transform against our pending and buffered ops
+            let serverOp = op;
+
+            if (pendingRef.current) {
+                const [pendingPrime, serverPrime] = transformOps(pendingRef.current, serverOp);
+                pendingRef.current = pendingPrime;
+                serverOp = serverPrime;
+            }
+
+            if (bufferRef.current) {
+                const [bufferPrime, serverPrime] = transformOps(bufferRef.current, serverOp);
+                bufferRef.current = bufferPrime;
+                serverOp = serverPrime;
+            }
+
+            // Apply the (possibly transformed) server op to our local document
+            const oldDoc = docRef.current;
+            const newDoc = applyOp(oldDoc, serverOp);
+            docRef.current = newDoc;
+
+            // Preserve cursor position while applying remote changes
+            const textarea = textareaRef.current;
+            let cursorBefore = textarea ? textarea.selectionStart : 0;
+
+            // Adjust cursor based on the server op
+            let pos = 0;
+            for (const c of serverOp) {
+                if (isRetain(c)) {
+                    pos += c;
+                } else if (isInsert(c)) {
+                    if (pos <= cursorBefore) cursorBefore += c.length;
+                    pos += c.length;
+                } else if (isDelete(c)) {
+                    const delCount = -c;
+                    if (pos < cursorBefore) {
+                        cursorBefore -= Math.min(delCount, cursorBefore - pos);
+                    }
+                }
+            }
+
+            setContent(newDoc);
+
+            // Restore cursor after React re-renders
+            requestAnimationFrame(() => {
+                if (textarea) {
+                    textarea.selectionStart = cursorBefore;
+                    textarea.selectionEnd = cursorBefore;
+                }
+            });
+        });
+
+        // ── OT error → full re-sync ────────────────────────────
+        socket.on('ot-error', () => {
+            console.warn('[OT] Error from server, requesting re-sync');
+        });
+
+        // ── Title updates (last-write-wins) ─────────────────────
+        socket.on('title-updated', (newTitle) => {
+            setTitle(newTitle);
         });
 
         socket.on('user-joined', (user) => {
@@ -137,40 +326,13 @@ export default function Editor() {
             setCollaborators(prev => prev.filter(c => (c.id || c.uid || c._id) !== leftUserId));
         });
 
-        // ── Write-lock listeners ─────────────────────────────
-        socket.on('lock-granted', () => {
-            setHasLock(true);
-            setLockHolder(null);
-            setLockRequesting(false);
-        });
-
-        socket.on('lock-denied', (data) => {
-            setHasLock(false);
-            if (data.holder) setLockHolder(data.holder);
-            setLockRequesting(false);
-        });
-
-        socket.on('note-locked', (data) => {
-            setLockHolder(data.holder);
-            setHasLock(false);
-        });
-
-        socket.on('note-unlocked', () => {
-            setLockHolder(null);
-            // Don't touch hasLock here — if this client released, it was already set to false
-        });
-
-        socket.on('lock-state', (data) => {
-            // Initial state on join — someone already holds the lock
-            setLockHolder(data.holder);
-            setHasLock(false);
-        });
-
         return () => {
-            // Release lock before leaving
-            socket.emit('release-edit-lock', noteId);
             socket.emit('leave-note', noteId);
-            socket.off('note-updated');
+            socket.off('doc-sync');
+            socket.off('op-ack');
+            socket.off('apply-op');
+            socket.off('ot-error');
+            socket.off('title-updated');
             socket.off('user-joined');
             socket.off('chat-message');
             socket.off('ai-typing');
@@ -179,30 +341,8 @@ export default function Editor() {
             socket.off('stroke-deleted');
             socket.off('drawings-cleared');
             socket.off('user-left');
-            socket.off('lock-granted');
-            socket.off('lock-denied');
-            socket.off('note-locked');
-            socket.off('note-unlocked');
-            socket.off('lock-state');
-            // Clear heartbeat
-            if (heartbeatRef.current) clearInterval(heartbeatRef.current);
         };
     }, [socket, noteId, currentUser]);
-
-    // Heartbeat to keep the lock alive while editing
-    useEffect(() => {
-        if (hasLock && socket) {
-            heartbeatRef.current = setInterval(() => {
-                socket.emit('heartbeat-lock', noteId);
-            }, 30000);
-        }
-        return () => {
-            if (heartbeatRef.current) {
-                clearInterval(heartbeatRef.current);
-                heartbeatRef.current = null;
-            }
-        };
-    }, [hasLock, socket, noteId]);
 
     useEffect(() => {
         fetchNote();
@@ -221,7 +361,7 @@ export default function Editor() {
             setIsLoading(true);
             const response = await api.get(`/api/notes/${noteId}`);
             setTitle(response.data.title);
-            setContent(response.data.content);
+            // Content will be set by doc-sync from the OT session
             if (response.data.messages) {
                 setMessages(response.data.messages);
             }
@@ -234,90 +374,79 @@ export default function Editor() {
                 alert("You do not have access to this note");
                 navigate('/');
             }
-        } finally {
-            setIsLoading(false);
         }
     }
 
+    // ── OT: Send local changes ──────────────────────────────────
+
+    const sendOp = useCallback((op) => {
+        if (!socket || !syncedRef.current || op.length === 0) return;
+
+        if (pendingRef.current === null) {
+            // No op in-flight, send directly
+            pendingRef.current = op;
+            socket.emit('submit-op', {
+                noteId,
+                revision: revisionRef.current,
+                op
+            });
+            setStatus('Syncing...');
+        } else {
+            // Already have an op in-flight, buffer this one
+            if (bufferRef.current === null) {
+                bufferRef.current = op;
+            } else {
+                // Compose the buffer with the new op
+                // Simple approach: just compose them
+                bufferRef.current = composeOps(bufferRef.current, op);
+            }
+        }
+    }, [socket, noteId]);
+
     const handleContentChange = (e) => {
-        if (!hasLock) return;
+        if (!syncedRef.current) return;
+
         const newContent = e.target.value;
+        const oldContent = docRef.current;
+
+        // Compute the OT operation from the diff
+        const op = diffToOp(oldContent, newContent);
+
+        if (op.length === 0) return;
+
+        // Update the shadow document
+        docRef.current = newContent;
         setContent(newContent);
-        setStatus('Unsaved...');
+        setStatus('Editing...');
 
         e.target.style.height = 'auto';
         e.target.style.height = `${e.target.scrollHeight}px`;
 
+        // Send to server
+        sendOp(op);
+    };
+
+    const handleTitleChange = (e) => {
+        const newTitle = e.target.value;
+        setTitle(newTitle);
         if (socket) {
-            socket.emit('edit-note', noteId, newContent);
+            socket.emit('edit-title', noteId, newTitle);
         }
     };
 
-    const handleInteraction = () => {
-        if (hasLock) return;
-        if (lockHolder) {
-            setWarningMsg('Cannot write right now');
-            if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
-            warningTimeoutRef.current = setTimeout(() => setWarningMsg(''), 3000);
-        } else if (!lockRequesting) {
-            setLockRequesting(true);
-            socket.emit('request-edit-lock', noteId);
-        }
-    };
-
-    const handleDocumentBlur = (e) => {
-        // If focus is moving between title and textarea, do not release
-        if (e.relatedTarget && (
-            e.relatedTarget.classList.contains('title-input') || 
-            e.relatedTarget.classList.contains('editor-textarea')
-        )) {
-            return;
-        }
-        
-        // Otherwise, focus left the document area -> release lock
-        if (socket && hasLock) {
-            saveNote();
-            socket.emit('release-edit-lock', noteId);
-            setHasLock(false);
-            setLockHolder(null);
-        }
-    };
-
-    const handleBackNavigation = () => {
-        if (socket && hasLock) {
-            saveNote();
-            socket.emit('release-edit-lock', noteId);
-        }
-        navigate('/');
-    };
-
-    // Simple debounce for saving to DB
+    // Simple debounce for saving title to DB
     useEffect(() => {
         const timeoutId = setTimeout(() => {
-            if (status === 'Unsaved...') {
-                saveNote();
+            if (title && socket) {
+                // Title is saved by the edit-title socket event
             }
         }, 2000);
         return () => clearTimeout(timeoutId);
-    }, [content, title]);
+    }, [title]);
 
-    async function saveNote() {
-        try {
-            setStatus('Saving...');
-            await api.put(`/api/notes/${noteId}`, {
-                title,
-                content
-            });
-            setStatus('Saved');
-        } catch (err) {
-            console.error("Failed to save", err);
-            setStatus('Error saving');
-        }
-    }
-
-    function handleGenericSave() {
-        saveNote();
-    }
+    const handleBackNavigation = () => {
+        navigate('/');
+    };
 
     const handleSendMessage = (e) => {
         e.preventDefault();
@@ -410,8 +539,7 @@ export default function Editor() {
             if (socket) {
                 socket.emit('draw-stroke', noteId, finishedStroke);
             }
-            // Real-time socket commands immediately save vectors to DB natively
-            setStatus('Saved');
+            setStatus('Synced');
         }
     };
 
@@ -437,7 +565,7 @@ export default function Editor() {
                     toKeep.push(stroke);
                 }
             }
-            if (erasedAny) setStatus('Saved');
+            if (erasedAny) setStatus('Synced');
             return toKeep;
         });
     };
@@ -447,7 +575,7 @@ export default function Editor() {
         if (socket) {
             socket.emit('clear-drawings', noteId);
         }
-        setStatus('Saved');
+        setStatus('Synced');
     };
 
     return (
@@ -467,11 +595,7 @@ export default function Editor() {
                     <input
                         className="title-input"
                         value={title}
-                        onClick={handleInteraction}
-                        onFocus={handleInteraction}
-                        onBlur={handleDocumentBlur}
-                        onChange={(e) => { if (hasLock) setTitle(e.target.value); }}
-                        readOnly={!hasLock}
+                        onChange={handleTitleChange}
                         placeholder="Untitled Note"
                     />
                 )}
@@ -489,10 +613,6 @@ export default function Editor() {
                         {status}
                     </div>
 
-                    <button className="header-btn save-btn" onClick={handleGenericSave} title="Save">
-                        <Save size={18} />
-                        <span>Save</span>
-                    </button>
                     {isSharing ? (
                         <form className="share-form" onSubmit={async (e) => {
                             e.preventDefault();
@@ -544,16 +664,6 @@ export default function Editor() {
                     </button>
                 </div>
             </header>
-
-            {/* Lock banner — visible when someone else holds the lock */}
-            {lockHolder && !hasLock && (
-                <div className="lock-banner">
-                    <span className="lock-pulse"></span>
-                    <Lock size={14} />
-                    <span>{lockHolder.userEmail} is editing</span>
-                    {warningMsg && <span style={{marginLeft: 'auto', color: '#f87171', fontWeight: 600}}>{warningMsg}</span>}
-                </div>
-            )}
             
             <div className="editor-content-wrapper" style={{ display: 'flex', flexGrow: 1, overflow: 'hidden', position: 'relative', minHeight: 0 }}>
                 <div className="editor-main-area">
@@ -626,15 +736,11 @@ export default function Editor() {
                         ) : (
                             <textarea
                                 ref={textareaRef}
-                                className={`editor-textarea ${!hasLock ? 'editor-readonly' : ''}`}
+                                className="editor-textarea"
                                 value={content}
-                                onClick={handleInteraction}
-                                onFocus={handleInteraction}
-                                onBlur={handleDocumentBlur}
                                 onChange={handleContentChange}
                                 onScroll={handleTextareaScroll}
-                                readOnly={!hasLock}
-                                placeholder={hasLock ? 'Start typing...' : 'Click to start editing...'}
+                                placeholder="Start typing..."
                             />
                         )}
                     </div>
@@ -743,3 +849,42 @@ export default function Editor() {
     );
 }
 
+// ── Compose helper for buffering ────────────────────────────────
+
+function composeOps(op1, op2) {
+    const { outputLen: op1Out } = opLengths(op1);
+    const { inputLen: op2In } = opLengths(op2);
+    if (op1Out !== op2In) {
+        // Length mismatch — can't compose, just use op2
+        // This is a safety fallback; should not happen in practice
+        console.warn('[OT] Compose length mismatch, using latest op');
+        return op2;
+    }
+
+    const builder = new OpBuilder();
+    let i1 = 0, i2 = 0;
+    let c1 = op1[i1], c2 = op2[i2];
+
+    while (i1 < op1.length || i2 < op2.length) {
+        if (c1 === undefined && c2 === undefined) break;
+        if (isDelete(c1)) { builder.delete(-c1); i1++; c1 = op1[i1]; continue; }
+        if (isInsert(c2)) { builder.insert(c2); i2++; c2 = op2[i2]; continue; }
+        if (c1 === undefined || c2 === undefined) break;
+
+        if (isRetain(c1) && isRetain(c2)) {
+            const m = Math.min(c1, c2); builder.retain(m);
+            c1 = c1 - m > 0 ? c1 - m : op1[++i1]; c2 = c2 - m > 0 ? c2 - m : op2[++i2];
+        } else if (isRetain(c1) && isDelete(c2)) {
+            const m = Math.min(c1, -c2); builder.delete(m);
+            c1 = c1 - m > 0 ? c1 - m : op1[++i1]; c2 = -c2 - m > 0 ? -((-c2) - m) : op2[++i2];
+        } else if (isInsert(c1) && isRetain(c2)) {
+            const m = Math.min(c1.length, c2); builder.insert(c1.slice(0, m));
+            c1 = c1.length - m > 0 ? c1.slice(m) : op1[++i1]; c2 = c2 - m > 0 ? c2 - m : op2[++i2];
+        } else if (isInsert(c1) && isDelete(c2)) {
+            const m = Math.min(c1.length, -c2);
+            c1 = c1.length - m > 0 ? c1.slice(m) : op1[++i1]; c2 = -c2 - m > 0 ? -((-c2) - m) : op2[++i2];
+        } else break;
+    }
+
+    return builder.build();
+}
