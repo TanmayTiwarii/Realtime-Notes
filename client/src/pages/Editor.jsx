@@ -810,14 +810,37 @@ export default function Editor() {
                             ) : (
                                 messages.map((m, idx) => {
                                     const isMe = m.sender === currentUser.email;
+                                    const msgDate = new Date(m.createdAt);
+                                    const prevDate = idx > 0 ? new Date(messages[idx - 1].createdAt) : null;
+
+                                    // Show date separator when the day changes
+                                    const showDateSep = !prevDate ||
+                                        msgDate.toDateString() !== prevDate.toDateString();
+
+                                    const formatDateLabel = (date) => {
+                                        const today = new Date();
+                                        const yesterday = new Date();
+                                        yesterday.setDate(today.getDate() - 1);
+                                        if (date.toDateString() === today.toDateString()) return 'Today';
+                                        if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+                                        return date.toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' });
+                                    };
+
                                     return (
-                                        <div key={idx} className={`chat-message ${isMe ? 'message-me' : m.isAi ? 'message-ai' : 'message-other'}`}>
-                                            <div className="message-sender">{isMe ? 'You' : m.sender}</div>
-                                            <div className="message-content">{m.content}</div>
-                                            <div className="message-time">
-                                                {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        <React.Fragment key={idx}>
+                                            {showDateSep && (
+                                                <div className="chat-date-separator">
+                                                    <span>{formatDateLabel(msgDate)}</span>
+                                                </div>
+                                            )}
+                                            <div className={`chat-message ${isMe ? 'message-me' : m.isAi ? 'message-ai' : 'message-other'}`}>
+                                                <div className="message-sender">{isMe ? 'You' : m.sender}</div>
+                                                <div className="message-content">{m.content}</div>
+                                                <div className="message-time">
+                                                    {msgDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                </div>
                                             </div>
-                                        </div>
+                                        </React.Fragment>
                                     );
                                 })
                             )}

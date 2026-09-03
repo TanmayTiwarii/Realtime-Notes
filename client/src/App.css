@@ -1305,6 +1305,36 @@ button {
   display: inline-block;
 }
 
+.chat-date-separator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin: 0.6rem 0;
+  gap: 0.75rem;
+}
+
+.chat-date-separator::before,
+.chat-date-separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.chat-date-separator span {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  background: rgba(30, 41, 59, 0.85);
+  padding: 0.25rem 0.85rem;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
 .chat-message {
   max-width: 85%;
   padding: 0.85rem 1rem;

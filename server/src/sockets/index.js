@@ -196,7 +196,7 @@ const socketHandler = (io) => {
                             { role: 'system', content: 'You are a helpful and expert AI assistant embedded in a shared notes workspace group chat.' },
                             { role: 'user', content: prompt }
                         ],
-                        model: 'llama-3.1-8b-instant',
+                        model: 'qwen/qwen3.8-27b',
                     });
 
                     const aiResponseText = response.choices[0]?.message?.content || "I'm processing the context streams!";
@@ -223,6 +223,23 @@ const socketHandler = (io) => {
             } catch (error) {
                 console.error('Error handling chat message:', error);
                 io.to(noteId).emit('ai-typing', false);
+
+                // Send error feedback so the user knows the AI failed
+                const errorMsg = {
+                    sender: 'AI Assistant',
+                    content: `Sorry, I encountered an error and couldn't respond. (${error.message || 'Unknown error'})`,
+                    isAi: true,
+                    createdAt: new Date()
+                };
+                const errorNote = await Note.findByIdAndUpdate(
+                    noteId,
+                    { $push: { messages: errorMsg } },
+                    { new: true, select: 'messages' }
+                );
+                if (errorNote) {
+                    const savedErrorMsg = errorNote.messages[errorNote.messages.length - 1];
+                    io.to(noteId).emit('chat-message', savedErrorMsg);
+                }
             }
         });
 
