@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
-import { Plus, LogOut, FileText, Trash2, Search, RefreshCw, Users, Share2, Sparkles } from 'lucide-react';
+import { Plus, LogOut, FileText, Trash2, Search, RefreshCw, Users, Share2 } from 'lucide-react';
 
 export default function Dashboard() {
     const [notes, setNotes] = useState([]);
@@ -10,9 +10,6 @@ export default function Dashboard() {
     const [activeTab, setActiveTab] = useState('all'); // 'all' | 'shared'
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
-    const [isSemanticSearch, setIsSemanticSearch] = useState(false);
-    const [semanticResults, setSemanticResults] = useState(null);
-    const [isSearching, setIsSearching] = useState(false);
     const { currentUser, logout } = useAuth();
     const [error, setError] = useState('');
     const navigate = useNavigate();
@@ -21,31 +18,6 @@ export default function Dashboard() {
         fetchNotes();
     }, []);
 
-    // Debounced semantic search
-    useEffect(() => {
-        if (!isSemanticSearch || !searchQuery.trim()) {
-            setSemanticResults(null);
-            return;
-        }
-
-        const timeoutId = setTimeout(async () => {
-            try {
-                setIsSearching(true);
-                const response = await api.post(`/api/notes/search`, {
-                    query: searchQuery,
-                    limit: 10
-                });
-                setSemanticResults(response.data);
-            } catch (err) {
-                console.error('Semantic search failed:', err);
-                setSemanticResults(null);
-            } finally {
-                setIsSearching(false);
-            }
-        }, 500);
-
-        return () => clearTimeout(timeoutId);
-    }, [searchQuery, isSemanticSearch]);
 
     async function fetchNotes() {
         try {
@@ -108,24 +80,20 @@ export default function Dashboard() {
 
     const currentUserId = currentUser?.id || currentUser?.uid || currentUser?._id;
 
-    const filteredNotes = (() => {
-        // If semantic search is active and has results, use those
-        if (isSemanticSearch && semanticResults !== null) {
-            return semanticResults;
+    const filteredNotes = notes.filter(note => {
+        const query = searchQuery.toLowerCase().trim();
+        if (query) {
+            const titleMatch = (note.title || '').toLowerCase().includes(query);
+            const contentMatch = (note.content || '').toLowerCase().includes(query);
+            if (!titleMatch && !contentMatch) return false;
         }
 
-        return notes.filter(note => {
-            // Search filter on the basis of heading only
-            const matchesSearch = (note.title || '').toLowerCase().includes(searchQuery.toLowerCase());
-            if (!matchesSearch) return false;
-
-            // Tab filter
-            if (activeTab === 'shared') {
-                return note.ownerId !== currentUserId;
-            }
-            return true; // 'all' shows everything
-        });
-    })();
+        // Tab filter
+        if (activeTab === 'shared') {
+            return note.ownerId !== currentUserId;
+        }
+        return true; // 'all' shows everything
+    });
 
     return (
         <div className="dashboard-layout">
@@ -191,21 +159,9 @@ export default function Dashboard() {
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder={isSemanticSearch ? 'Search by meaning (AI-powered)...' : 'Search note headings...'}
+                            placeholder="Search notes by title or content..."
                             className="topbar-search-input"
                         />
-                        <button
-                            className={`semantic-search-toggle ${isSemanticSearch ? 'active' : ''}`}
-                            onClick={() => {
-                                setIsSemanticSearch(!isSemanticSearch);
-                                setSemanticResults(null);
-                            }}
-                            title={isSemanticSearch ? 'Switch to keyword search' : 'Switch to AI semantic search'}
-                        >
-                            <Sparkles size={16} />
-                            <span>{isSemanticSearch ? 'AI' : 'AI'}</span>
-                        </button>
-                        {isSearching && <div className="search-spinner" />}
                     </div>
 
                     <div className="topbar-actions">

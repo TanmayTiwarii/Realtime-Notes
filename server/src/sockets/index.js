@@ -152,43 +152,54 @@ const socketHandler = (io) => {
 
                     // Constrain token payloads cleanly to eliminate API queue bottlenecks
                     const recentMessages = updatedNote.messages.slice(-8).map(m => `[${m.sender}]: ${m.content}`).join('\n');
-                    const truncatedContent = updatedNote.content?.slice(0, 2500) || '';
+                    
+                    // Always read the live in-memory OT document so AI sees real-time edits
+                    const liveDoc = getDocument(noteId)?.document;
+                    const documentContent = (liveDoc !== undefined && liveDoc !== null ? liveDoc : updatedNote.content) || '';
+                    const truncatedContent = documentContent.slice(0, 3500);
 
-                    // --- RAG: Retrieve relevant chunks from vector search ---
+                    // Clean prompt for semantic RAG search (strip '@ai')
+                    const cleanQuery = content.replace(/@ai\b/gi, '').trim();
+
+                    // --- RAG: Retrieve relevant chunks from vector search across other workspace notes ---
                     let ragContext = '';
                     try {
-                        // Get the user ID from the socket (set during join-note)
                         const userId = socket.userId;
-                        if (userId) {
-                            const relevantChunks = await searchSimilarChunks(content, userId.toString(), 6);
-                            if (relevantChunks.length > 0) {
-                                ragContext = '\n\nRelevant Passages from Workspace (retrieved via semantic chunk search):\n' +
-                                    relevantChunks.map((c, i) => 
-                                        `--- Passage ${i + 1} (from "${c.noteTitle}", chunk #${c.chunkIndex}) [score: ${c.score.toFixed(2)}] ---\n${c.chunkContent}`
+                        if (userId && cleanQuery.length > 2) {
+                            const relevantChunks = await searchSimilarChunks(cleanQuery, userId.toString(), 6);
+                            // Exclude chunks from current note since current note content is already injected directly
+                            const otherNotesChunks = relevantChunks.filter(c => c.noteId.toString() !== noteId.toString());
+                            if (otherNotesChunks.length > 0) {
+                                ragContext = '\n\nRelevant Passages from Other Workspace Notes:\n' +
+                                    otherNotesChunks.map((c, i) => 
+                                        `--- Passage ${i + 1} (from "${c.noteTitle}") ---\n${c.chunkContent}`
                                     ).join('\n\n');
-                                console.log(`[RAG] Injected ${relevantChunks.length} relevant chunks into AI context`);
+                                console.log(`[RAG] Injected ${otherNotesChunks.length} relevant chunks into AI context for query: "${cleanQuery}"`);
                             }
                         }
                     } catch (ragError) {
                         console.error('[RAG] Retrieval failed, proceeding without RAG:', ragError.message);
                     }
 
-                    const prompt = `You are an AI assistant participating in a group chat inside a shared collaborative document.
-                    The user asking you the question right now is: ${sender}
+                    const prompt = `You are a helpful AI assistant embedded in a shared collaborative workspace note.
+The user asking you a question is: ${sender}
 
-                    Current Document Content:
-                    """
-                    ${truncatedContent}
-                    """${ragContext}
+User Question:
+"${cleanQuery || content}"
 
-                    Recent Chat History:
-                    ${recentMessages}
+Current Document Content:
+"""
+${truncatedContent || '(Empty document)'}
+"""${ragContext}
 
-                    Instructions:
-                    1. Respond directly to the latest question/message from the user (${sender}) in a friendly, conversational tone.
-                    2. Address them directly as "you" or speak to the group naturally.
-                    3. Keep responses highly focused, accurate, and concise.
-                    4. If relevant passages from the workspace were provided, use that knowledge to give more informed answers. Reference the source note title when helpful.`;
+Recent Chat History:
+${recentMessages}
+
+Instructions:
+1. Respond directly to the user's question in a clear, friendly, and helpful tone.
+2. If the user asks about the current note (e.g. summarize, critique, expand, analyze), use the "Current Document Content" above.
+3. If relevant passages from other workspace notes were provided, synthesize that knowledge and mention the source note title when helpful.
+4. Keep responses concise, well-structured, and accurate.`;
 
                     // Run inference logic asynchronously
                     const response = await groq.chat.completions.create({

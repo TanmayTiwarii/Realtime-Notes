@@ -187,8 +187,14 @@ export async function searchSimilarChunks(queryText, userId, limit = 10) {
             }
         ]);
 
-        // Filter out low-relevance results
-        const MIN_SCORE_THRESHOLD = 0.6;
+        console.log(`[RAG] Raw scores for "${queryText.slice(0, 30)}": [${results.map(r => r.score.toFixed(3)).join(', ')}]`);
+        if (results.length > 0) {
+            console.log(`[RAG] Top match preview [${results[0].score.toFixed(3)}]: "${results[0].content.slice(0, 70).replace(/\n/g, ' ')}..."`);
+        }
+
+        // Filter out low-relevance results (0.65 threshold cleanly separates top matches
+        // around ~0.657 from the ~0.630-0.640 background noise floor)
+        const MIN_SCORE_THRESHOLD = 0.65;
         const filtered = results.filter(r => r.score >= MIN_SCORE_THRESHOLD);
 
         // Deduplicate by noteId — keep only the highest-scoring chunk per note
